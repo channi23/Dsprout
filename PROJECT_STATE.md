@@ -1,8 +1,8 @@
 # PROJECT_STATE
 
-Last updated after Milestone 4.
+Last updated after Milestone 5.
 
-## Current Architecture
+## current architecture
 
 - Monorepo root:
 - `app/` (Next.js frontend, not integrated yet)
@@ -10,13 +10,13 @@ Last updated after Milestone 4.
 
 - Backend crates:
 - `server/dsprout-common`:
-- shared identity, pnet loader, crypto, sharding, hashing, network protocol/types.
+- shared identity, pnet loader, crypto, sharding, hashing, libp2p request/response protocol, and now shared durable manifest/signed-manifest models.
 - `server/dsprout-worker`:
 - libp2p worker node, local shard storage, RAM hot-cache, shard store/prepare/verify handlers, CLI profile/listen config, satellite registration/heartbeat.
 - `server/dsprout-uplink`:
-- libp2p client, upload/download pipeline, satellite client, round-robin multi-worker placement, multi-worker retrieval and reconstruction.
+- libp2p client, upload/download pipeline, satellite client, round-robin multi-worker placement, multi-worker retrieval and reconstruction, local signed-manifest cache, manifest register/fetch logic.
 - `server/dsprout-satellite`:
-- axum registry/index service for workers and shard locations.
+- axum registry/index service for workers, shard locations, and signed manifests.
 
 - Network protocol (request-response over private libp2p transport):
 - `Hello` / `HelloAck`
@@ -25,44 +25,46 @@ Last updated after Milestone 4.
 - `StoreShard` / `StoreShardAck`
 - `Error`
 
+- Satellite HTTP API:
+- `POST /register_worker`
+- `POST /heartbeat`
+- `GET /workers`
+- `POST /register_shard`
+- `GET /locate?file_id=...`
+- `POST /register_manifest`
+- `GET /manifest?file_id=...`
+
 - libp2p transport stack:
 - Ed25519 identity (profile-scoped key files)
 - PSK private network via `server/swarm.key`
 - TCP + pnet + noise + yamux
 - identify + request_response behaviours
 
-## Files Changed (Milestone 4)
+## files changed
 
-- `server/dsprout-worker/src/main.rs`
-- Added `--profile`, `--listen`, `--satellite-url` runtime args.
-- Added satellite self-register + periodic heartbeat.
-- Kept shard handlers (`Prepare`, `VerifyGet`, `StoreShard`, `Hello`).
-
-- `server/dsprout-worker/Cargo.toml`
-- Added `reqwest` + `serde` for satellite HTTP calls.
+- `server/dsprout-common/src/models.rs`
+- Added shared `FileManifest`, `ManifestSegment`, and `SignedManifest` types.
+- Added manifest signing and verification helpers using uploader identity/public key.
+- Added shared satellite payload types (`WorkerInfo`, `ShardRecord`, `RegisterShardReq`, `LocateResp`, `RegisterManifestReq`).
 
 - `server/dsprout-satellite/src/main.rs`
-- Added `POST /register_worker`, `GET /workers`.
-- Worker registry now stores `worker_id`, `multiaddr`, `last_seen`.
-- Heartbeat updates worker metadata.
-- Shard records now include `worker_multiaddr`.
+- Refactored to use shared model types from `dsprout-common`.
+- Added in-memory manifest index.
+- Added `POST /register_manifest` with signature verification.
+- Added `GET /manifest?file_id=...`.
+
+- `server/dsprout-satellite/Cargo.toml`
+- Added dependency on `dsprout-common`.
 
 - `server/dsprout-uplink/src/main.rs`
-- Upload now supports multiple workers:
-- repeated `--worker <multiaddr>` OR fallback to satellite `/workers`.
-- round-robin shard placement across connected workers.
-- shard registration includes correct worker id + multiaddr.
-- Download now supports multi-worker retrieval:
-- queries satellite shard locations.
-- dials relevant workers.
-- sends per-worker `Prepare`.
-- fetches sufficient shards across online workers.
-- reconstructs + decrypts with offline worker tolerance.
+- Replaced local-only manifest structs with shared signed-manifest model.
+- Upload flow now signs manifest with uplink identity, stores locally, and registers to satellite.
+- Download flow now tries local manifest first, else fetches from satellite, verifies signature, and continues reconstruction.
 
 - `server/Cargo.lock`
 - Updated due dependency graph changes.
 
-## Commands To Run
+## commands to run
 
 All commands below are from repository root (`dsprout`).
 
@@ -70,7 +72,7 @@ All commands below are from repository root (`dsprout`).
 
 ```bash
 cd server
-cargo build -p dsprout-satellite -p dsprout-worker -p dsprout-uplink
+cargo build -p dsprout-common -p dsprout-satellite -p dsprout-worker -p dsprout-uplink
 ```
 
 ### 2) Start satellite
@@ -89,26 +91,26 @@ cargo run -p dsprout-worker -- --profile w2 --listen /ip4/127.0.0.1/tcp/4102 --s
 cargo run -p dsprout-worker -- --profile w3 --listen /ip4/127.0.0.1/tcp/4103 --satellite-url http://127.0.0.1:7070
 ```
 
-### 4) Upload with explicit workers (round-robin placement)
+### 4) Upload with explicit workers (registers signed manifest)
 
 ```bash
 cd server
 cargo run -p dsprout-uplink -- upload \
   --satellite-url http://127.0.0.1:7070 \
   --input /tmp/input.bin \
-  --file-id milestone4-e2e \
+  --file-id milestone5-e2e \
   --worker /ip4/127.0.0.1/tcp/4101 \
   --worker /ip4/127.0.0.1/tcp/4102 \
   --worker /ip4/127.0.0.1/tcp/4103
 ```
 
-### 5) Download and reconstruct
+### 5) Download and reconstruct (local manifest if present, satellite fallback if absent)
 
 ```bash
 cd server
 cargo run -p dsprout-uplink -- download \
   --satellite-url http://127.0.0.1:7070 \
-  --file-id milestone4-e2e \
+  --file-id milestone5-e2e \
   --output /tmp/output.bin
 ```
 
@@ -118,39 +120,46 @@ cargo run -p dsprout-uplink -- download \
 cmp -s /tmp/input.bin /tmp/output.bin && echo "MATCH" || echo "MISMATCH"
 ```
 
-### 7) Optional: seed worker shard manually (debug path)
+### 7) Validate milestone-5 fallback path (delete local uplink manifest cache)
 
 ```bash
+rm -f "$HOME/Library/Application Support/dsprout/uplink_meta/milestone5-e2e.json"
 cd server
-cargo run -p dsprout-worker -- seed --file-id demo-file --segment 0 --shard 7 --data "test-bytes"
+cargo run -p dsprout-uplink -- download \
+  --satellite-url http://127.0.0.1:7070 \
+  --file-id milestone5-e2e \
+  --output /tmp/output.bin
+cmp -s /tmp/input.bin /tmp/output.bin && echo "MATCH" || echo "MISMATCH"
 ```
 
-## Validations Passed
+## validations passed
 
-Milestone 4 validation executed successfully:
+Milestone 5 validation executed successfully:
 
-- Upload across multiple workers succeeded.
-- Download with all workers online succeeded.
-- Download with one worker offline succeeded (as enough shards remained online).
-- Hash and byte equality checks matched.
+- Build passed for `dsprout-common`, `dsprout-satellite`, and `dsprout-uplink`.
+- Multi-worker upload succeeded and signed manifest was saved locally.
+- Signed manifest registration to satellite succeeded.
+- Download succeeded with local manifest present.
+- Download succeeded after deleting local uplink manifest cache (manifest fetched from satellite).
+- Restored file matched original exactly (`cmp` success).
 
 Observed result set from validation run:
-- `UPLOAD_EXIT=0`
-- `DOWNLOAD_ALL_EXIT=0`
-- `CMP_ALL_EXIT=0`
-- `DOWNLOAD_OFFLINE_EXIT=0`
-- `CMP_OFFLINE_EXIT=0`
-- `equal=true` for both online and one-offline download runs.
+- `FILE_ID=milestone5-e2e-1772965973`
+- `UPLOAD_OK=1`
+- `LOCAL_MANIFEST_DELETED=1`
+- `DOWNLOAD_OK=1`
+- `CMP_OK=1`
 
-## Remaining Warnings / Issues
+## remaining warnings/issues
 
+- Satellite manifest index is currently in-memory only; it is durable for client reconstruction model semantics, but not persistent across satellite restart yet.
 - `server/swarm.key` is local secret material and intentionally git-ignored at repo root.
-- Current placement strategy is simple round-robin, no replication policy tuning yet.
+- Placement strategy is still simple round-robin, no advanced replication policy tuning yet.
 - No Kademlia/bootstrap/gossipsub/discovery yet (intentionally out of scope).
 - No frontend integration yet (intentionally out of scope).
-- Download currently reconnects to workers each run (acceptable for milestone scope).
+- Download reconnects to workers each run (acceptable for current milestone scope).
 - No advanced retry/backoff/telemetry around worker request failures yet.
 
-## Next Milestone Start Guidance
+## next milestone start guidance
 
 When opening a new Codex session, paste this file first and ask for the next milestone only.

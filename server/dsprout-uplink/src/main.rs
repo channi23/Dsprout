@@ -1,7 +1,11 @@
 use anyhow::Result;
 use dsprout_common::{
     crypto, hash,
-    models::{RS_K, RS_N, SEGMENT_SIZE},
+    identity,
+    models::{
+        FileManifest, LocateResp, ManifestSegment, RS_K, RS_N, RegisterManifestReq,
+        RegisterShardReq, ShardRecord, SignedManifest, WorkerInfo, SEGMENT_SIZE,
+    },
     net::{
         DsproutBehaviour, DsproutEvent, build_swarm,
         hello::{NetRequest, NetResponse},
@@ -10,7 +14,6 @@ use dsprout_common::{
 };
 use futures::StreamExt;
 use libp2p::{Multiaddr, PeerId, Swarm, request_response, swarm::SwarmEvent};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     env, fs,
@@ -45,50 +48,6 @@ struct DownloadArgs {
 enum Command {
     Upload(UploadArgs),
     Download(DownloadArgs),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SegmentManifest {
-    segment_index: u32,
-    plaintext_len: usize,
-    ciphertext_len: usize,
-    nonce: [u8; 12],
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UploadManifest {
-    file_id: String,
-    original_len: usize,
-    original_hash_hex: String,
-    segments: Vec<SegmentManifest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkerInfo {
-    worker_id: String,
-    multiaddr: String,
-    last_seen: u128,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ShardRecord {
-    worker_id: String,
-    worker_multiaddr: String,
-    file_id: String,
-    segment_index: u32,
-    shard_index: u8,
-    shard_hash_hex: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RegisterShardReq {
-    record: ShardRecord,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LocateResp {
-    file_id: String,
-    shards: Vec<ShardRecord>,
 }
 
 struct SatelliteClient {
@@ -135,6 +94,31 @@ impl SatelliteClient {
         let res = self.http.get(self.endpoint("/workers")).send().await?;
         let res = res.error_for_status()?;
         Ok(res.json::<Vec<WorkerInfo>>().await?)
+    }
+
+    async fn register_manifest(&self, signed_manifest: &SignedManifest) -> Result<()> {
+        let req = RegisterManifestReq {
+            signed_manifest: signed_manifest.clone(),
+        };
+        let res = self
+            .http
+            .post(self.endpoint("/register_manifest"))
+            .json(&req)
+            .send()
+            .await?;
+        res.error_for_status()?;
+        Ok(())
+    }
+
+    async fn manifest(&self, file_id: &str) -> Result<SignedManifest> {
+        let res = self
+            .http
+            .get(self.endpoint("/manifest"))
+            .query(&[("file_id", file_id)])
+            .send()
+            .await?;
+        let res = res.error_for_status()?;
+        Ok(res.json::<SignedManifest>().await?)
     }
 }
 
@@ -343,14 +327,14 @@ fn manifest_path(file_id: &str) -> Result<PathBuf> {
     Ok(uplink_meta_dir()?.join(format!("{file_id}.json")))
 }
 
-fn save_manifest(manifest: &UploadManifest) -> Result<PathBuf> {
-    let path = manifest_path(&manifest.file_id)?;
+fn save_manifest(manifest: &SignedManifest) -> Result<PathBuf> {
+    let path = manifest_path(&manifest.manifest.file_id)?;
     let bytes = serde_json::to_vec_pretty(manifest)?;
     fs::write(&path, bytes)?;
     Ok(path)
 }
 
-fn load_manifest(file_id: &str) -> Result<UploadManifest> {
+fn load_manifest(file_id: &str) -> Result<SignedManifest> {
     let bytes = fs::read(manifest_path(file_id)?)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
@@ -491,34 +475,47 @@ async fn run_upload(args: UploadArgs) -> Result<()> {
                 .await?;
         }
 
-        segments.push(SegmentManifest {
+        segments.push(ManifestSegment {
             segment_index,
-            plaintext_len: chunk.len(),
-            ciphertext_len,
+            plaintext_len: chunk.len() as u64,
+            ciphertext_len: ciphertext_len as u64,
             nonce,
         });
     }
 
-    let manifest = UploadManifest {
+    let manifest = FileManifest {
         file_id: file_id.clone(),
-        original_len: input_bytes.len(),
+        original_len: input_bytes.len() as u64,
         original_hash_hex,
         segments,
     };
-    let manifest_path = save_manifest(&manifest)?;
+    let uploader_kp = identity::load_or_create_keypair_for("uplink")?;
+    let signed_manifest = SignedManifest::sign(manifest, &uploader_kp)?;
+    let manifest_path = save_manifest(&signed_manifest)?;
+    satellite.register_manifest(&signed_manifest).await?;
 
     println!("Upload complete");
     println!("file_id={file_id}");
     println!("workers_connected={}", workers.len());
     println!("manifest={}", manifest_path.display());
-    println!("segments={}", manifest.segments.len());
+    println!("segments={}", signed_manifest.manifest.segments.len());
+    println!("manifest_registered=true");
 
     Ok(())
 }
 
 async fn run_download(args: DownloadArgs) -> Result<()> {
-    let manifest = load_manifest(&args.file_id)?;
     let satellite = SatelliteClient::new(args.common.satellite_url.clone());
+    let signed_manifest = match load_manifest(&args.file_id) {
+        Ok(local) => local,
+        Err(_) => {
+            let remote = satellite.manifest(&args.file_id).await?;
+            let _ = save_manifest(&remote);
+            remote
+        }
+    };
+    signed_manifest.verify()?;
+    let manifest = &signed_manifest.manifest;
     let locate = satellite.locate(&args.file_id).await?;
 
     if locate.shards.is_empty() {
@@ -696,13 +693,13 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
             ));
         }
 
-        let encrypted = sharding::rs_reconstruct(shard_options, segment.ciphertext_len)?;
+        let encrypted = sharding::rs_reconstruct(shard_options, segment.ciphertext_len as usize)?;
         let key = crypto::derive_file_key(
             ROOT_SECRET,
             &format!("{}:{}", manifest.file_id, segment.segment_index),
         );
         let mut plaintext = crypto::decrypt_aes256gcm(&key, &encrypted, &segment.nonce)?;
-        plaintext.truncate(segment.plaintext_len);
+        plaintext.truncate(segment.plaintext_len as usize);
         restored.extend_from_slice(&plaintext);
     }
 
@@ -710,7 +707,7 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 
     let restored_hash_hex = hash::blake3_hash_hex(&restored);
     let equal =
-        restored_hash_hex == manifest.original_hash_hex && restored.len() == manifest.original_len;
+        restored_hash_hex == manifest.original_hash_hex && restored.len() as u64 == manifest.original_len;
 
     println!("Download complete");
     println!("file_id={}", manifest.file_id);

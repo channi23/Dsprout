@@ -1,9 +1,13 @@
 use axum::{
     Json, Router,
+    http::StatusCode,
     routing::{get, post},
 };
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
+use dsprout_common::models::{
+    LocateResp, RegisterManifestReq, RegisterShardReq, ShardRecord, SignedManifest, WorkerInfo,
+};
+use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone)]
@@ -12,46 +16,20 @@ struct AppState {
     workers: Arc<DashMap<String, WorkerInfo>>,
     // file_id -> list of shard records
     shard_index: Arc<DashMap<String, Vec<ShardRecord>>>,
+    // file_id -> signed manifest
+    manifest_index: Arc<DashMap<String, SignedManifest>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkerInfo {
-    worker_id: String,
-    multiaddr: String,
-    last_seen: u128,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct RegisterWorkerReq {
     worker_id: String,
     multiaddr: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct HeartbeatReq {
     worker_id: String,
     multiaddr: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ShardRecord {
-    worker_id: String,
-    worker_multiaddr: String,
-    file_id: String,
-    segment_index: u32,
-    shard_index: u8,
-    shard_hash_hex: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RegisterShardReq {
-    record: ShardRecord,
-}
-
-#[derive(Debug, Serialize)]
-struct LocateResp {
-    file_id: String,
-    shards: Vec<ShardRecord>,
 }
 
 fn now_ms() -> u128 {
@@ -125,11 +103,40 @@ async fn locate(
     Json(LocateResp { file_id, shards })
 }
 
+async fn register_manifest(
+    state: axum::extract::State<AppState>,
+    Json(req): Json<RegisterManifestReq>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    req.signed_manifest
+        .verify()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid manifest signature: {e}")))?;
+
+    let file_id = req.signed_manifest.manifest.file_id.clone();
+    state.manifest_index.insert(file_id, req.signed_manifest);
+    Ok(Json("ok"))
+}
+
+async fn get_manifest(
+    state: axum::extract::State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<SignedManifest>, (StatusCode, String)> {
+    let file_id = q.get("file_id").cloned().unwrap_or_default();
+    if file_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "file_id is required".to_string()));
+    }
+
+    match state.manifest_index.get(&file_id) {
+        Some(v) => Ok(Json(v.clone())),
+        None => Err((StatusCode::NOT_FOUND, "manifest not found".to_string())),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let state = AppState {
         workers: Arc::new(DashMap::new()),
         shard_index: Arc::new(DashMap::new()),
+        manifest_index: Arc::new(DashMap::new()),
     };
 
     let app = Router::new()
@@ -138,6 +145,8 @@ async fn main() {
         .route("/heartbeat", post(heartbeat))
         .route("/register_shard", post(register_shard))
         .route("/locate", get(locate))
+        .route("/register_manifest", post(register_manifest))
+        .route("/manifest", get(get_manifest))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:7070").await.unwrap();
