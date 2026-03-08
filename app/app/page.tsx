@@ -24,6 +24,21 @@ export default function Home() {
               Contributor Registration
             </Link>
           </li>
+          <li>
+            <Link className="underline" href="/files">
+              File Lookup
+            </Link>
+          </li>
+          <li>
+            <Link className="underline" href="/files/upload">
+              Upload Form
+            </Link>
+          </li>
+          <li>
+            <Link className="underline" href="/files/download">
+              Download Form
+            </Link>
+          </li>
         </ul>
       </section>
     </main>

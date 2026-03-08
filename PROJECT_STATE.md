@@ -1,79 +1,58 @@
 # PROJECT_STATE
 
-Last updated after Milestone 12.
+Last updated after Milestone 13.
 
 ## current architecture
 
 - Monorepo root:
-- `app/` (Next.js contributor dashboard)
+- `app/` (Next.js contributor + file operations dashboard)
 - `server/` (Rust backend workspace)
 
 - Backend crates:
 - `server/dsprout-common`:
-- shared identity, pnet loader, crypto, sharding, hashing, libp2p protocol types, manifests, and worker metadata request/response models.
+- shared identity, crypto/sharding/hash, manifest models, and worker metadata models.
 - `server/dsprout-worker`:
-- libp2p worker with shard store, startup inventory re-registration, registration + heartbeat, and startup metadata fields (`device_name`, `owner_label`, `capacity_limit_bytes`, `used_bytes`, `enabled`).
+- libp2p worker with metadata-aware registration/heartbeat and shard inventory recovery.
 - `server/dsprout-uplink`:
-- upload/download/repair client with healthy worker discovery and replication.
+- upload/download/repair core logic (terminal engine still source of truth).
 - `server/dsprout-satellite`:
-- axum registry/index with SQLite persistence for workers, shard records, and manifests.
-- worker metadata now includes:
-- `device_name`
-- `owner_label`
-- `capacity_limit_bytes`
-- `used_bytes`
-- `enabled`
+- registry/index + persistence service with SQLite; now also exposes thin HTTP file action APIs that invoke uplink logic.
 
-- Frontend dashboard:
-- worker list page
-- worker detail/status page
-- contributor registration form page
-- all pages call satellite endpoints through server-side fetch / server action
+- Frontend:
+- workers list/detail + contributor registration (Milestone 12)
+- file lookup/detail + upload form + download form (Milestone 13)
 
 ## files changed
 
-- `server/dsprout-common/src/models.rs`
-- Extended `WorkerInfo` with metadata fields.
-- Added shared request models: `RegisterWorkerReq`, `UpdateWorkerReq`.
-
 - `server/dsprout-satellite/src/main.rs`
-- Extended worker persistence schema for metadata fields.
-- Added migration logic for existing SQLite workers table columns.
-- Updated `/register_worker` to persist full metadata.
-- Updated `/heartbeat` to keep compatibility and allow metadata refresh.
-- Added `POST /update_worker` endpoint.
-- Added `GET /worker?worker_id=...` endpoint.
-- Kept `GET /workers` behavior compatible (now returns richer worker objects).
+- Added thin file action API layer:
+- `POST /upload`
+- `POST /download`
+- `POST /repair` (optional)
+- Reuses existing uplink behavior by invoking `dsprout-uplink` binary from satellite process.
+- Returns structured JSON responses with file_id/hash/status and payload data for download.
+- Preserves existing worker/shard/manifest endpoints and SQLite persistence behavior.
 
-- `server/dsprout-worker/src/main.rs`
-- Added worker startup args:
-- `--device-name`
-- `--owner-label`
-- `--capacity-limit-bytes`
-- `--enabled`
-- Worker registration now sends metadata fields.
-- Heartbeat now sends metadata + refreshed `used_bytes` from local shard scan.
-
-- `server/dsprout-uplink/src/main.rs`
-- Discovery now also filters `enabled=false` workers out.
+- `server/dsprout-satellite/Cargo.toml`
+- Added `base64` dependency and tokio `process`/`fs` features for file action endpoints.
 
 - `app/lib/satellite.ts`
-- Added shared frontend satellite types/helpers for workers/manifests/locate and HTTP helpers.
+- Added typed request/response models for upload/download API integration.
 
 - `app/app/page.tsx`
-- Home page converted to navigation hub for contributor dashboard routes.
+- Extended nav hub with file operation routes.
 
-- `app/app/workers/page.tsx`
-- Worker list view with health, capacity, used space, enabled status, last_seen lag.
+- `app/app/files/page.tsx`
+- Added file lookup/detail view via `/manifest` and `/locate`.
 
-- `app/app/workers/[worker_id]/page.tsx`
-- Worker detail/status view.
+- `app/app/files/upload/page.tsx`
+- Added upload form (file + optional file_id + replication_factor) posting to satellite `/upload`.
 
-- `app/app/contributors/page.tsx`
-- Contributor-facing registration form posting worker metadata to satellite.
+- `app/app/files/download/page.tsx`
+- Added download form posting to satellite `/download` and save link for returned bytes.
 
 - `PROJECT_STATE.md`
-- Updated for Milestone 12.
+- Updated for Milestone 13.
 
 ## commands to run
 
@@ -86,28 +65,16 @@ cd server
 cargo build -p dsprout-common -p dsprout-satellite -p dsprout-worker -p dsprout-uplink
 ```
 
-### 2) Start satellite
+### 2) Start backend
 
 ```bash
 cd server
 cargo run -p dsprout-satellite
+cargo run -p dsprout-worker -- --profile w1 --listen /ip4/127.0.0.1/tcp/5901 --satellite-url http://127.0.0.1:7070 --device-name "W1" --owner-label "Contributor" --capacity-limit-bytes 1073741824 --enabled true
+cargo run -p dsprout-worker -- --profile w2 --listen /ip4/127.0.0.1/tcp/5902 --satellite-url http://127.0.0.1:7070 --device-name "W2" --owner-label "Contributor" --capacity-limit-bytes 1073741824 --enabled true
 ```
 
-### 3) Start worker with contributor metadata
-
-```bash
-cd server
-cargo run -p dsprout-worker -- \
-  --profile w1 \
-  --listen /ip4/127.0.0.1/tcp/5801 \
-  --satellite-url http://127.0.0.1:7070 \
-  --device-name "Devbox-1" \
-  --owner-label "Alice" \
-  --capacity-limit-bytes 21474836480 \
-  --enabled true
-```
-
-### 4) Run dashboard
+### 3) Run frontend
 
 ```bash
 cd app
@@ -117,42 +84,45 @@ SATELLITE_URL=http://127.0.0.1:7070 npm run dev
 
 Open: `http://localhost:3000`
 
-### 5) Direct endpoint checks
+### 4) Milestone 13 direct API checks
 
 ```bash
-curl -s http://127.0.0.1:7070/workers
-curl -s "http://127.0.0.1:7070/worker?worker_id=<worker_id>"
-curl -s -X POST http://127.0.0.1:7070/update_worker \
+# upload
+curl -s -X POST http://127.0.0.1:7070/upload \
   -H 'content-type: application/json' \
-  -d '{"worker_id":"<worker_id>","owner_label":"Alice-Updated","enabled":false}'
+  -d '{"file_bytes_base64":"<BASE64_BYTES>","replication_factor":2}'
+
+# download
+curl -s -X POST http://127.0.0.1:7070/download \
+  -H 'content-type: application/json' \
+  -d '{"file_id":"<FILE_ID>"}'
 ```
 
 ## validations passed
 
-Milestone 12 validation executed successfully:
+Milestone 13 validation executed successfully:
 
-- Backend compiles with new worker metadata model + endpoints.
-- Frontend lint passes with new dashboard pages.
-- Integration checks passed for worker metadata APIs:
-- list workers (`GET /workers`)
-- get worker details (`GET /worker?worker_id=...`)
-- update worker metadata (`POST /update_worker`)
-- worker startup registration sends metadata fields.
+- Backend compile passed with new file action endpoints.
+- Frontend lint passed with new upload/download/file pages.
+- Live HTTP endpoint test passed:
+- `POST /upload` succeeded
+- `POST /download` succeeded
+- downloaded bytes matched uploaded input exactly.
 
-Observed result set from integration run:
-- `WORKER_ID=12D3KooWEDTkTbsz9zGNvaFXFL2hCBcWqbhJCWZvEKVziFV5HwC8`
-- `LIST_WORKERS_OK=1`
-- `GET_WORKER_OK=1`
-- `UPDATE_WORKER_OK=1`
-- `REGISTRATION_METADATA_FLOW_OK=1`
+Observed result set from validation run:
+- `UPLOAD_HTTP_OK=1`
+- `DOWNLOAD_HTTP_OK=1`
+- `FILE_ID=ui-b7f6651e-bd30-4e9a-8753-139c0958f67f`
+- `EQUAL=true`
+- `CMP_OK=1`
 
 ## remaining warnings/issues
 
-- Contributor form currently registers/updates worker metadata only; no auth or contributor identity model yet.
-- Dashboard does not yet include upload/download/repair actions (intentionally out of scope).
-- Worker health remains lag-based from `last_seen` and fixed threshold in UI/backend flows.
-- No Tauri/native packaging yet (intentionally out of scope).
-- No Kademlia/gossipsub/cloud deployment/performance tuning yet (intentionally out of scope).
+- `/upload` and `/download` currently use base64 payloads/responses for minimal UI integration; large files are not optimized.
+- No auth on file action endpoints yet (intentionally out of scope for this milestone).
+- Satellite file actions assume local sibling `dsprout-uplink` binary availability.
+- Dashboard still does not include advanced queue/progress UX.
+- No desktop packaging/cloud deployment/protocol refactors yet (intentionally out of scope).
 
 ## next milestone start guidance
 

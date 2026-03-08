@@ -52,6 +52,34 @@ export type LocateResp = {
   shards: ShardRecord[];
 };
 
+export type UploadApiReq = {
+  file_bytes_base64: string;
+  file_id?: string;
+  replication_factor?: number;
+};
+
+export type UploadApiResp = {
+  status: string;
+  file_id: string;
+  input_hash: string;
+  bytes: number;
+  replication_factor: number;
+};
+
+export type DownloadApiReq = {
+  file_id: string;
+};
+
+export type DownloadApiResp = {
+  status: string;
+  file_id: string;
+  original_hash: string;
+  restored_hash: string;
+  equal: boolean;
+  bytes: number;
+  file_bytes_base64: string;
+};
+
 export function satelliteBaseUrl(): string {
   return process.env.SATELLITE_URL?.trim() || "http://127.0.0.1:7070";
 }

@@ -4,19 +4,24 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use dashmap::DashMap;
-use dsprout_common::models::{
-    LocateResp, RegisterManifestReq, RegisterShardReq, RegisterWorkerReq, ShardRecord,
-    SignedManifest, UpdateWorkerReq, WorkerInfo,
+use dsprout_common::{
+    hash,
+    models::{
+        LocateResp, RegisterManifestReq, RegisterShardReq, RegisterWorkerReq, ShardRecord,
+        SignedManifest, UpdateWorkerReq, WorkerInfo,
+    },
 };
 use rusqlite::{Connection, params};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+use tokio::process::Command;
 
 #[derive(Clone)]
 struct PersistentStore {
@@ -314,6 +319,53 @@ struct HeartbeatReq {
     enabled: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct UploadReq {
+    file_bytes_base64: String,
+    file_id: Option<String>,
+    replication_factor: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UploadResp {
+    status: String,
+    file_id: String,
+    input_hash: String,
+    bytes: usize,
+    replication_factor: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DownloadReq {
+    file_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DownloadResp {
+    status: String,
+    file_id: String,
+    original_hash: String,
+    restored_hash: String,
+    equal: bool,
+    bytes: usize,
+    file_bytes_base64: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RepairReq {
+    file_id: String,
+    replication_factor: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RepairResp {
+    status: String,
+    file_id: String,
+    target_replication_factor: usize,
+    repaired_shards: usize,
+    new_replicas: usize,
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -342,6 +394,41 @@ fn upsert_shard_in_memory(state: &AppState, rec: ShardRecord) {
             }
         })
         .or_insert(vec![rec]);
+}
+
+fn parse_kv_line(stdout: &str, key: &str) -> Option<String> {
+    stdout.lines().find_map(|line| {
+        let (k, v) = line.split_once('=')?;
+        if k.trim() == key {
+            Some(v.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn uplink_bin_path() -> AnyResult<PathBuf> {
+    let current = std::env::current_exe()?;
+    let dir = current
+        .parent()
+        .ok_or_else(|| anyhow!("cannot resolve current exe parent"))?;
+    Ok(dir.join("dsprout-uplink"))
+}
+
+async fn run_uplink(args: &[String]) -> AnyResult<String> {
+    let bin = uplink_bin_path()?;
+    let output = Command::new(bin).args(args).output().await?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(anyhow!(
+            "uplink command failed: status={} stdout={} stderr={}",
+            output.status,
+            stdout,
+            stderr
+        ));
+    }
+    Ok(stdout)
 }
 
 async fn register_worker(
@@ -511,6 +598,108 @@ async fn get_manifest(
     }
 }
 
+async fn upload_action(Json(req): Json<UploadReq>) -> Result<Json<UploadResp>, (StatusCode, String)> {
+    let file_bytes = B64
+        .decode(req.file_bytes_base64.as_bytes())
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid base64 payload: {e}")))?;
+
+    let file_id = req
+        .file_id
+        .unwrap_or_else(|| format!("ui-{}", uuid::Uuid::new_v4()));
+    let replication_factor = req.replication_factor.unwrap_or(2);
+    let input_hash = hash::blake3_hash_hex(&file_bytes);
+
+    let tmp_input = std::env::temp_dir().join(format!("dsprout-ui-upload-{file_id}.bin"));
+    tokio::fs::write(&tmp_input, &file_bytes)
+        .await
+        .map_err(to_internal_error)?;
+
+    let args = vec![
+        "upload".to_string(),
+        "--satellite-url".to_string(),
+        "http://127.0.0.1:7070".to_string(),
+        "--input".to_string(),
+        tmp_input.to_string_lossy().to_string(),
+        "--file-id".to_string(),
+        file_id.clone(),
+        "--replication-factor".to_string(),
+        replication_factor.to_string(),
+    ];
+
+    run_uplink(&args).await.map_err(to_internal_error)?;
+
+    Ok(Json(UploadResp {
+        status: "ok".to_string(),
+        file_id,
+        input_hash,
+        bytes: file_bytes.len(),
+        replication_factor,
+    }))
+}
+
+async fn download_action(
+    Json(req): Json<DownloadReq>,
+) -> Result<Json<DownloadResp>, (StatusCode, String)> {
+    let tmp_output = std::env::temp_dir().join(format!("dsprout-ui-download-{}.bin", req.file_id));
+    let args = vec![
+        "download".to_string(),
+        "--satellite-url".to_string(),
+        "http://127.0.0.1:7070".to_string(),
+        "--file-id".to_string(),
+        req.file_id.clone(),
+        "--output".to_string(),
+        tmp_output.to_string_lossy().to_string(),
+    ];
+
+    let stdout = run_uplink(&args).await.map_err(to_internal_error)?;
+    let bytes = tokio::fs::read(&tmp_output).await.map_err(to_internal_error)?;
+
+    let original_hash = parse_kv_line(&stdout, "original_hash").unwrap_or_default();
+    let restored_hash = parse_kv_line(&stdout, "restored_hash").unwrap_or_default();
+    let equal = parse_kv_line(&stdout, "equal")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    Ok(Json(DownloadResp {
+        status: "ok".to_string(),
+        file_id: req.file_id,
+        original_hash,
+        restored_hash,
+        equal,
+        bytes: bytes.len(),
+        file_bytes_base64: B64.encode(bytes),
+    }))
+}
+
+async fn repair_action(Json(req): Json<RepairReq>) -> Result<Json<RepairResp>, (StatusCode, String)> {
+    let target = req.replication_factor.unwrap_or(2);
+    let args = vec![
+        "repair".to_string(),
+        "--satellite-url".to_string(),
+        "http://127.0.0.1:7070".to_string(),
+        "--file-id".to_string(),
+        req.file_id.clone(),
+        "--replication-factor".to_string(),
+        target.to_string(),
+    ];
+
+    let stdout = run_uplink(&args).await.map_err(to_internal_error)?;
+    let repaired_shards = parse_kv_line(&stdout, "repaired_shards")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    let new_replicas = parse_kv_line(&stdout, "new_replicas")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    Ok(Json(RepairResp {
+        status: "ok".to_string(),
+        file_id: req.file_id,
+        target_replication_factor: target,
+        repaired_shards,
+        new_replicas,
+    }))
+}
+
 fn load_state_from_store(store: &PersistentStore) -> AnyResult<AppState> {
     let workers_loaded = store.load_workers()?;
     let shards_loaded = store.load_shards()?;
@@ -523,21 +712,15 @@ fn load_state_from_store(store: &PersistentStore) -> AnyResult<AppState> {
 
     let shard_index: Arc<DashMap<String, Vec<ShardRecord>>> = Arc::new(DashMap::new());
     for rec in shards_loaded {
-        shard_index
-            .entry(rec.file_id.clone())
-            .and_modify(|v| {
-                if let Some(existing) = v.iter_mut().find(|existing| {
-                    existing.file_id == rec.file_id
-                        && existing.segment_index == rec.segment_index
-                        && existing.shard_index == rec.shard_index
-                        && existing.worker_id == rec.worker_id
-                }) {
-                    *existing = rec.clone();
-                } else {
-                    v.push(rec.clone());
-                }
-            })
-            .or_insert(vec![rec]);
+        upsert_shard_in_memory(
+            &AppState {
+                workers: workers.clone(),
+                shard_index: shard_index.clone(),
+                manifest_index: Arc::new(DashMap::new()),
+                store: store.clone(),
+            },
+            rec,
+        );
     }
 
     let manifest_index = Arc::new(DashMap::new());
@@ -580,6 +763,9 @@ async fn main() -> AnyResult<()> {
         .route("/locate", get(locate))
         .route("/register_manifest", post(register_manifest))
         .route("/manifest", get(get_manifest))
+        .route("/upload", post(upload_action))
+        .route("/download", post(download_action))
+        .route("/repair", post(repair_action))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:7070").await?;
