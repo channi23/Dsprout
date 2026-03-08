@@ -432,7 +432,12 @@ async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<Wor
     let mut healthy_workers = Vec::new();
     let mut unhealthy = 0usize;
     let mut invalid_addr = 0usize;
+    let mut disabled = 0usize;
     for w in satellite.workers().await? {
+        if !w.enabled {
+            disabled += 1;
+            continue;
+        }
         if now.saturating_sub(w.last_seen) > WORKER_HEALTH_MAX_AGE_MS {
             unhealthy += 1;
             continue;
@@ -449,10 +454,10 @@ async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<Wor
         return Err(anyhow::anyhow!("no healthy workers discovered from /workers"));
     }
 
-    if unhealthy > 0 || invalid_addr > 0 {
+    if unhealthy > 0 || invalid_addr > 0 || disabled > 0 {
         eprintln!(
-            "worker discovery filtered: unhealthy={} invalid_multiaddr={}",
-            unhealthy, invalid_addr
+            "worker discovery filtered: unhealthy={} disabled={} invalid_multiaddr={}",
+            unhealthy, disabled, invalid_addr
         );
     }
 

@@ -1,104 +1,158 @@
 # PROJECT_STATE
 
-Last updated after Milestone 11.
+Last updated after Milestone 12.
 
 ## current architecture
 
 - Monorepo root:
-- `app/` (Next.js dashboard)
+- `app/` (Next.js contributor dashboard)
 - `server/` (Rust backend workspace)
 
 - Backend crates:
 - `server/dsprout-common`:
-- shared identity, pnet loader, crypto, sharding, hashing, libp2p request/response protocol, shared durable manifest/signed-manifest models.
+- shared identity, pnet loader, crypto, sharding, hashing, libp2p protocol types, manifests, and worker metadata request/response models.
 - `server/dsprout-worker`:
-- libp2p worker node with profile-scoped local shard storage, RAM hot-cache, shard store/prepare/verify handlers, startup shard inventory scan + re-registration, registration + heartbeat.
+- libp2p worker with shard store, startup inventory re-registration, registration + heartbeat, and startup metadata fields (`device_name`, `owner_label`, `capacity_limit_bytes`, `used_bytes`, `enabled`).
 - `server/dsprout-uplink`:
-- libp2p client with satellite-driven upload worker discovery, health filtering, shard replication, signed manifest handling, download from `/locate`, and file-scoped repair command.
+- upload/download/repair client with healthy worker discovery and replication.
 - `server/dsprout-satellite`:
-- axum registry/index service for workers, shard locations, and signed manifests with SQLite persistence and startup reload.
+- axum registry/index with SQLite persistence for workers, shard records, and manifests.
+- worker metadata now includes:
+- `device_name`
+- `owner_label`
+- `capacity_limit_bytes`
+- `used_bytes`
+- `enabled`
 
-- Frontend dashboard (`app/`):
-- Minimal read-only Next.js page for cluster visibility.
-- Reads satellite endpoints directly from server-rendered page:
-- `GET /workers`
-- `GET /manifest?file_id=...`
-- `GET /locate?file_id=...`
-- Shows worker table with health status computed from `last_seen` lag.
-- Provides file lookup form (`file_id`) and per-file summary.
-- No upload/download/repair actions in UI yet.
+- Frontend dashboard:
+- worker list page
+- worker detail/status page
+- contributor registration form page
+- all pages call satellite endpoints through server-side fetch / server action
 
 ## files changed
 
+- `server/dsprout-common/src/models.rs`
+- Extended `WorkerInfo` with metadata fields.
+- Added shared request models: `RegisterWorkerReq`, `UpdateWorkerReq`.
+
+- `server/dsprout-satellite/src/main.rs`
+- Extended worker persistence schema for metadata fields.
+- Added migration logic for existing SQLite workers table columns.
+- Updated `/register_worker` to persist full metadata.
+- Updated `/heartbeat` to keep compatibility and allow metadata refresh.
+- Added `POST /update_worker` endpoint.
+- Added `GET /worker?worker_id=...` endpoint.
+- Kept `GET /workers` behavior compatible (now returns richer worker objects).
+
+- `server/dsprout-worker/src/main.rs`
+- Added worker startup args:
+- `--device-name`
+- `--owner-label`
+- `--capacity-limit-bytes`
+- `--enabled`
+- Worker registration now sends metadata fields.
+- Heartbeat now sends metadata + refreshed `used_bytes` from local shard scan.
+
+- `server/dsprout-uplink/src/main.rs`
+- Discovery now also filters `enabled=false` workers out.
+
+- `app/lib/satellite.ts`
+- Added shared frontend satellite types/helpers for workers/manifests/locate and HTTP helpers.
+
 - `app/app/page.tsx`
-- Replaced default starter page with dashboard view.
-- Added worker list section using `/workers`.
-- Added health status derived from `last_seen` lag.
-- Added file lookup section for `/manifest` and `/locate`.
-- Added per-file summary:
-- `file_id`
-- segment count
-- shard record count
-- unique shard count
-- replica counts (min/max/avg)
+- Home page converted to navigation hub for contributor dashboard routes.
+
+- `app/app/workers/page.tsx`
+- Worker list view with health, capacity, used space, enabled status, last_seen lag.
+
+- `app/app/workers/[worker_id]/page.tsx`
+- Worker detail/status view.
+
+- `app/app/contributors/page.tsx`
+- Contributor-facing registration form posting worker metadata to satellite.
 
 - `PROJECT_STATE.md`
-- Updated for Milestone 11.
+- Updated for Milestone 12.
 
 ## commands to run
 
 All commands below are from repository root (`dsprout`).
 
-### 1) Start backend services
+### 1) Build backend
+
+```bash
+cd server
+cargo build -p dsprout-common -p dsprout-satellite -p dsprout-worker -p dsprout-uplink
+```
+
+### 2) Start satellite
 
 ```bash
 cd server
 cargo run -p dsprout-satellite
-cargo run -p dsprout-worker -- --profile w1 --listen /ip4/127.0.0.1/tcp/5701 --satellite-url http://127.0.0.1:7070
-cargo run -p dsprout-worker -- --profile w2 --listen /ip4/127.0.0.1/tcp/5702 --satellite-url http://127.0.0.1:7070
 ```
 
-### 2) Run dashboard
+### 3) Start worker with contributor metadata
+
+```bash
+cd server
+cargo run -p dsprout-worker -- \
+  --profile w1 \
+  --listen /ip4/127.0.0.1/tcp/5801 \
+  --satellite-url http://127.0.0.1:7070 \
+  --device-name "Devbox-1" \
+  --owner-label "Alice" \
+  --capacity-limit-bytes 21474836480 \
+  --enabled true
+```
+
+### 4) Run dashboard
 
 ```bash
 cd app
 npm install
-npm run dev
+SATELLITE_URL=http://127.0.0.1:7070 npm run dev
 ```
 
-### 3) Open dashboard
+Open: `http://localhost:3000`
 
-```text
-http://localhost:3000
-```
-
-### 4) Optional satellite URL override
+### 5) Direct endpoint checks
 
 ```bash
-cd app
-SATELLITE_URL=http://127.0.0.1:7070 npm run dev
+curl -s http://127.0.0.1:7070/workers
+curl -s "http://127.0.0.1:7070/worker?worker_id=<worker_id>"
+curl -s -X POST http://127.0.0.1:7070/update_worker \
+  -H 'content-type: application/json' \
+  -d '{"worker_id":"<worker_id>","owner_label":"Alice-Updated","enabled":false}'
 ```
 
 ## validations passed
 
-Milestone 11 validation executed:
+Milestone 12 validation executed successfully:
 
-- `npm run lint` passed for dashboard changes.
-- Dashboard page compiles under lint/type checks and uses required endpoints.
-- Functional scope implemented:
-- worker list with health status
-- file lookup for manifest + locate
-- per-file summary with replica counts
+- Backend compiles with new worker metadata model + endpoints.
+- Frontend lint passes with new dashboard pages.
+- Integration checks passed for worker metadata APIs:
+- list workers (`GET /workers`)
+- get worker details (`GET /worker?worker_id=...`)
+- update worker metadata (`POST /update_worker`)
+- worker startup registration sends metadata fields.
 
-Validation note:
-- `npm run build` failed in sandbox because existing `next/font/google` setup could not fetch external fonts (network-restricted environment), not due dashboard code logic.
+Observed result set from integration run:
+- `WORKER_ID=12D3KooWEDTkTbsz9zGNvaFXFL2hCBcWqbhJCWZvEKVziFV5HwC8`
+- `LIST_WORKERS_OK=1`
+- `GET_WORKER_OK=1`
+- `UPDATE_WORKER_OK=1`
+- `REGISTRATION_METADATA_FLOW_OK=1`
 
 ## remaining warnings/issues
 
-- Dashboard is read-only by design (no upload/download/repair actions yet).
-- Worker health in UI is based on relative `last_seen` lag from latest worker timestamp.
-- Next.js production build in this sandbox may fail due blocked external font fetch from Google Fonts.
-- No Kademlia/bootstrap/gossipsub/cloud deployment/performance optimization yet (intentionally out of scope).
+- Contributor form currently registers/updates worker metadata only; no auth or contributor identity model yet.
+- Dashboard does not yet include upload/download/repair actions (intentionally out of scope).
+- Worker health remains lag-based from `last_seen` and fixed threshold in UI/backend flows.
+- No Tauri/native packaging yet (intentionally out of scope).
+- No Kademlia/gossipsub/cloud deployment/performance tuning yet (intentionally out of scope).
 
 ## next milestone start guidance
 

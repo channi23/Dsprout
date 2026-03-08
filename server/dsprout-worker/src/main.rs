@@ -3,7 +3,7 @@ mod store;
 use anyhow::Result;
 use dsprout_common::{
     hash,
-    models::{RegisterShardReq, ShardRecord},
+    models::{RegisterShardReq, RegisterWorkerReq, ShardRecord},
     net::{
         DsproutEvent, build_swarm,
         hello::{NetRequest, NetResponse},
@@ -19,12 +19,21 @@ struct RunArgs {
     profile: String,
     listen: Multiaddr,
     satellite_url: String,
+    device_name: String,
+    owner_label: String,
+    capacity_limit_bytes: u64,
+    enabled: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
-struct WorkerRegistration {
+struct WorkerHeartbeat {
     worker_id: String,
     multiaddr: String,
+    device_name: Option<String>,
+    owner_label: Option<String>,
+    capacity_limit_bytes: Option<u64>,
+    used_bytes: Option<u64>,
+    enabled: Option<bool>,
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>> {
@@ -107,6 +116,10 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs> {
     let mut profile = "worker".to_string();
     let mut listen: Multiaddr = "/ip4/0.0.0.0/tcp/4001".parse()?;
     let mut satellite_url = "http://127.0.0.1:7070".to_string();
+    let mut device_name: Option<String> = None;
+    let mut owner_label = "local-contributor".to_string();
+    let mut capacity_limit_bytes: u64 = 10 * 1024 * 1024 * 1024;
+    let mut enabled = true;
 
     let mut i = 0usize;
     while i < args.len() {
@@ -132,12 +145,49 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs> {
                     .ok_or_else(|| anyhow::anyhow!("missing value for --satellite-url"))?
                     .clone();
             }
+            "--device-name" => {
+                i += 1;
+                device_name = Some(
+                    args.get(i)
+                        .ok_or_else(|| anyhow::anyhow!("missing value for --device-name"))?
+                        .clone(),
+                );
+            }
+            "--owner-label" => {
+                i += 1;
+                owner_label = args
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --owner-label"))?
+                    .clone();
+            }
+            "--capacity-limit-bytes" => {
+                i += 1;
+                capacity_limit_bytes = args
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --capacity-limit-bytes"))?
+                    .parse()?;
+            }
+            "--enabled" => {
+                i += 1;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --enabled"))?;
+                enabled = match v.as_str() {
+                    "1" | "true" | "TRUE" | "True" => true,
+                    "0" | "false" | "FALSE" | "False" => false,
+                    _ => return Err(anyhow::anyhow!("--enabled must be true/false/1/0")),
+                };
+            }
             unknown => return Err(anyhow::anyhow!("unknown argument: {unknown}")),
         }
         i += 1;
     }
 
     Ok(RunArgs {
+        device_name: device_name.unwrap_or_else(|| profile.clone()),
+        owner_label,
+        capacity_limit_bytes,
+        enabled,
         profile,
         listen,
         satellite_url,
@@ -201,6 +251,13 @@ async fn reregister_local_shards(
     Ok(registered)
 }
 
+fn used_bytes_from_local_scan() -> u64 {
+    match store::scan_local_shards() {
+        Ok(shards) => shards.iter().map(|s| s.bytes.len() as u64).sum(),
+        Err(_) => 0,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -231,9 +288,14 @@ async fn main() -> Result<()> {
     println!("Worker profile: {}", run.profile);
     println!("Worker listening on: {}", run.listen);
 
-    let reg = WorkerRegistration {
+    let reg = RegisterWorkerReq {
         worker_id: worker_id.clone(),
         multiaddr: run.listen.to_string(),
+        device_name: run.device_name.clone(),
+        owner_label: run.owner_label.clone(),
+        capacity_limit_bytes: run.capacity_limit_bytes,
+        used_bytes: used_bytes_from_local_scan(),
+        enabled: run.enabled,
     };
     post_json(&run.satellite_url, "/register_worker", &reg).await;
     match reregister_local_shards(&run.satellite_url, &reg.worker_id, &reg.multiaddr).await {
@@ -246,12 +308,22 @@ async fn main() -> Result<()> {
     }
 
     let satellite_url = run.satellite_url.clone();
-    let heartbeat_payload = reg.clone();
+    let heartbeat_base = WorkerHeartbeat {
+        worker_id: reg.worker_id.clone(),
+        multiaddr: reg.multiaddr.clone(),
+        device_name: Some(reg.device_name.clone()),
+        owner_label: Some(reg.owner_label.clone()),
+        capacity_limit_bytes: Some(reg.capacity_limit_bytes),
+        used_bytes: None,
+        enabled: Some(reg.enabled),
+    };
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
         loop {
             ticker.tick().await;
-            post_json(&satellite_url, "/heartbeat", &heartbeat_payload).await;
+            let mut payload = heartbeat_base.clone();
+            payload.used_bytes = Some(used_bytes_from_local_scan());
+            post_json(&satellite_url, "/heartbeat", &payload).await;
         }
     });
 

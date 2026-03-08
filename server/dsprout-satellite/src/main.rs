@@ -6,12 +6,13 @@ use axum::{
 };
 use dashmap::DashMap;
 use dsprout_common::models::{
-    LocateResp, RegisterManifestReq, RegisterShardReq, ShardRecord, SignedManifest, WorkerInfo,
+    LocateResp, RegisterManifestReq, RegisterShardReq, RegisterWorkerReq, ShardRecord,
+    SignedManifest, UpdateWorkerReq, WorkerInfo,
 };
 use rusqlite::{Connection, params};
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -50,6 +51,11 @@ impl PersistentStore {
             CREATE TABLE IF NOT EXISTS workers (
                 worker_id TEXT PRIMARY KEY,
                 multiaddr TEXT NOT NULL,
+                device_name TEXT NOT NULL DEFAULT '',
+                owner_label TEXT NOT NULL DEFAULT '',
+                capacity_limit_bytes INTEGER NOT NULL DEFAULT 0,
+                used_bytes INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
                 last_seen INTEGER NOT NULL
             );
 
@@ -83,6 +89,48 @@ impl PersistentStore {
             ",
         )?;
 
+        let existing_cols: HashSet<String> = {
+            let mut cols = HashSet::new();
+            let mut stmt = conn.prepare("PRAGMA table_info(workers)")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let col_name: String = row.get(1)?;
+                cols.insert(col_name);
+            }
+            cols
+        };
+
+        if !existing_cols.contains("device_name") {
+            conn.execute(
+                "ALTER TABLE workers ADD COLUMN device_name TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+        if !existing_cols.contains("owner_label") {
+            conn.execute(
+                "ALTER TABLE workers ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+        if !existing_cols.contains("capacity_limit_bytes") {
+            conn.execute(
+                "ALTER TABLE workers ADD COLUMN capacity_limit_bytes INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        if !existing_cols.contains("used_bytes") {
+            conn.execute(
+                "ALTER TABLE workers ADD COLUMN used_bytes INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        if !existing_cols.contains("enabled") {
+            conn.execute(
+                "ALTER TABLE workers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -91,15 +139,29 @@ impl PersistentStore {
             .conn
             .lock()
             .map_err(|_| anyhow!("sqlite mutex poisoned"))?;
-        let mut stmt = conn.prepare("SELECT worker_id, multiaddr, last_seen FROM workers")?;
+        let mut stmt = conn.prepare(
+            "
+            SELECT worker_id, multiaddr, device_name, owner_label,
+                   capacity_limit_bytes, used_bytes, enabled, last_seen
+            FROM workers
+            ",
+        )?;
         let mut rows = stmt.query([])?;
 
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
-            let last_seen: i64 = row.get(2)?;
+            let capacity_limit_bytes: i64 = row.get(4)?;
+            let used_bytes: i64 = row.get(5)?;
+            let enabled: i64 = row.get(6)?;
+            let last_seen: i64 = row.get(7)?;
             out.push(WorkerInfo {
                 worker_id: row.get(0)?,
                 multiaddr: row.get(1)?,
+                device_name: row.get(2)?,
+                owner_label: row.get(3)?,
+                capacity_limit_bytes: capacity_limit_bytes as u64,
+                used_bytes: used_bytes as u64,
+                enabled: enabled != 0,
                 last_seen: last_seen as u128,
             });
         }
@@ -159,15 +221,28 @@ impl PersistentStore {
             .map_err(|_| anyhow!("sqlite mutex poisoned"))?;
         conn.execute(
             "
-            INSERT INTO workers(worker_id, multiaddr, last_seen)
-            VALUES(?1, ?2, ?3)
+            INSERT INTO workers(
+              worker_id, multiaddr, device_name, owner_label,
+              capacity_limit_bytes, used_bytes, enabled, last_seen
+            )
+            VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(worker_id) DO UPDATE SET
               multiaddr = excluded.multiaddr,
+              device_name = excluded.device_name,
+              owner_label = excluded.owner_label,
+              capacity_limit_bytes = excluded.capacity_limit_bytes,
+              used_bytes = excluded.used_bytes,
+              enabled = excluded.enabled,
               last_seen = excluded.last_seen
             ",
             params![
                 worker.worker_id,
                 worker.multiaddr,
+                worker.device_name,
+                worker.owner_label,
+                worker.capacity_limit_bytes as i64,
+                worker.used_bytes as i64,
+                if worker.enabled { 1 } else { 0 },
                 worker.last_seen as i64,
             ],
         )?;
@@ -222,26 +297,21 @@ impl PersistentStore {
 
 #[derive(Clone)]
 struct AppState {
-    // worker_id -> worker info
     workers: Arc<DashMap<String, WorkerInfo>>,
-    // file_id -> list of shard records
     shard_index: Arc<DashMap<String, Vec<ShardRecord>>>,
-    // file_id -> signed manifest
     manifest_index: Arc<DashMap<String, SignedManifest>>,
-    // sqlite-backed persistence
     store: PersistentStore,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RegisterWorkerReq {
-    worker_id: String,
-    multiaddr: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct HeartbeatReq {
     worker_id: String,
     multiaddr: String,
+    device_name: Option<String>,
+    owner_label: Option<String>,
+    capacity_limit_bytes: Option<u64>,
+    used_bytes: Option<u64>,
+    enabled: Option<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -281,6 +351,11 @@ async fn register_worker(
     let worker = WorkerInfo {
         worker_id: req.worker_id.clone(),
         multiaddr: req.multiaddr,
+        device_name: req.device_name,
+        owner_label: req.owner_label,
+        capacity_limit_bytes: req.capacity_limit_bytes,
+        used_bytes: req.used_bytes,
+        enabled: req.enabled,
         last_seen: now_ms(),
     };
 
@@ -289,9 +364,54 @@ async fn register_worker(
     Ok(Json("ok"))
 }
 
+async fn update_worker(
+    state: axum::extract::State<AppState>,
+    Json(req): Json<UpdateWorkerReq>,
+) -> Result<Json<WorkerInfo>, (StatusCode, String)> {
+    let existing = state
+        .workers
+        .get(&req.worker_id)
+        .map(|v| v.clone())
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "worker not found".to_string()))?;
+
+    let updated = WorkerInfo {
+        worker_id: existing.worker_id.clone(),
+        multiaddr: req.multiaddr.unwrap_or(existing.multiaddr),
+        device_name: req.device_name.unwrap_or(existing.device_name),
+        owner_label: req.owner_label.unwrap_or(existing.owner_label),
+        capacity_limit_bytes: req
+            .capacity_limit_bytes
+            .unwrap_or(existing.capacity_limit_bytes),
+        used_bytes: req.used_bytes.unwrap_or(existing.used_bytes),
+        enabled: req.enabled.unwrap_or(existing.enabled),
+        last_seen: now_ms(),
+    };
+
+    state.store.upsert_worker(&updated).map_err(to_internal_error)?;
+    state
+        .workers
+        .insert(updated.worker_id.clone(), updated.clone());
+    Ok(Json(updated))
+}
+
 async fn workers(state: axum::extract::State<AppState>) -> Json<Vec<WorkerInfo>> {
     let out: Vec<WorkerInfo> = state.workers.iter().map(|e| e.value().clone()).collect();
     Json(out)
+}
+
+async fn get_worker(
+    state: axum::extract::State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<WorkerInfo>, (StatusCode, String)> {
+    let worker_id = q.get("worker_id").cloned().unwrap_or_default();
+    if worker_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "worker_id is required".to_string()));
+    }
+
+    match state.workers.get(&worker_id) {
+        Some(v) => Ok(Json(v.clone())),
+        None => Err((StatusCode::NOT_FOUND, "worker not found".to_string())),
+    }
 }
 
 async fn heartbeat(
@@ -299,21 +419,36 @@ async fn heartbeat(
     Json(req): Json<HeartbeatReq>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
     let now = now_ms();
+    let existing = state.workers.get(&req.worker_id).map(|v| v.clone());
+
     let worker = WorkerInfo {
         worker_id: req.worker_id.clone(),
         multiaddr: req.multiaddr.clone(),
+        device_name: req
+            .device_name
+            .or_else(|| existing.as_ref().map(|w| w.device_name.clone()))
+            .unwrap_or_else(|| "unknown-device".to_string()),
+        owner_label: req
+            .owner_label
+            .or_else(|| existing.as_ref().map(|w| w.owner_label.clone()))
+            .unwrap_or_else(|| "unknown-owner".to_string()),
+        capacity_limit_bytes: req
+            .capacity_limit_bytes
+            .or_else(|| existing.as_ref().map(|w| w.capacity_limit_bytes))
+            .unwrap_or(0),
+        used_bytes: req
+            .used_bytes
+            .or_else(|| existing.as_ref().map(|w| w.used_bytes))
+            .unwrap_or(0),
+        enabled: req
+            .enabled
+            .or_else(|| existing.as_ref().map(|w| w.enabled))
+            .unwrap_or(true),
         last_seen: now,
     };
 
     state.store.upsert_worker(&worker).map_err(to_internal_error)?;
-    state
-        .workers
-        .entry(req.worker_id.clone())
-        .and_modify(|w| {
-            w.last_seen = now;
-            w.multiaddr = req.multiaddr.clone();
-        })
-        .or_insert(worker);
+    state.workers.insert(req.worker_id, worker);
     Ok(Json("ok"))
 }
 
@@ -390,7 +525,18 @@ fn load_state_from_store(store: &PersistentStore) -> AnyResult<AppState> {
     for rec in shards_loaded {
         shard_index
             .entry(rec.file_id.clone())
-            .and_modify(|v| v.push(rec.clone()))
+            .and_modify(|v| {
+                if let Some(existing) = v.iter_mut().find(|existing| {
+                    existing.file_id == rec.file_id
+                        && existing.segment_index == rec.segment_index
+                        && existing.shard_index == rec.shard_index
+                        && existing.worker_id == rec.worker_id
+                }) {
+                    *existing = rec.clone();
+                } else {
+                    v.push(rec.clone());
+                }
+            })
             .or_insert(vec![rec]);
     }
 
@@ -426,6 +572,8 @@ async fn main() -> AnyResult<()> {
 
     let app = Router::new()
         .route("/register_worker", post(register_worker))
+        .route("/update_worker", post(update_worker))
+        .route("/worker", get(get_worker))
         .route("/workers", get(workers))
         .route("/heartbeat", post(heartbeat))
         .route("/register_shard", post(register_shard))

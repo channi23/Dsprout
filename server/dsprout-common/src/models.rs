@@ -88,7 +88,34 @@ impl SignedManifest {
 pub struct WorkerInfo {
     pub worker_id: String,
     pub multiaddr: String,
+    pub device_name: String,
+    pub owner_label: String,
+    pub capacity_limit_bytes: u64,
+    pub used_bytes: u64,
+    pub enabled: bool,
     pub last_seen: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWorkerReq {
+    pub worker_id: String,
+    pub multiaddr: String,
+    pub device_name: String,
+    pub owner_label: String,
+    pub capacity_limit_bytes: u64,
+    pub used_bytes: u64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateWorkerReq {
+    pub worker_id: String,
+    pub multiaddr: Option<String>,
+    pub device_name: Option<String>,
+    pub owner_label: Option<String>,
+    pub capacity_limit_bytes: Option<u64>,
+    pub used_bytes: Option<u64>,
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
