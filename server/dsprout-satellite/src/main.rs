@@ -60,10 +60,21 @@ impl PersistentStore {
                 shard_index INTEGER NOT NULL,
                 worker_id TEXT NOT NULL,
                 worker_multiaddr TEXT NOT NULL,
-                shard_hash_hex TEXT NOT NULL
+                shard_hash_hex TEXT NOT NULL,
+                UNIQUE(file_id, segment_index, shard_index, worker_id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_shards_file_id ON shard_records(file_id);
+
+            DELETE FROM shard_records
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM shard_records
+                GROUP BY file_id, segment_index, shard_index, worker_id
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_shards_unique
+              ON shard_records(file_id, segment_index, shard_index, worker_id);
 
             CREATE TABLE IF NOT EXISTS manifests (
                 file_id TEXT PRIMARY KEY,
@@ -173,6 +184,9 @@ impl PersistentStore {
             INSERT INTO shard_records(
               file_id, segment_index, shard_index, worker_id, worker_multiaddr, shard_hash_hex
             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(file_id, segment_index, shard_index, worker_id) DO UPDATE SET
+              worker_multiaddr = excluded.worker_multiaddr,
+              shard_hash_hex = excluded.shard_hash_hex
             ",
             params![
                 rec.file_id,
@@ -241,6 +255,25 @@ fn to_internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
+fn upsert_shard_in_memory(state: &AppState, rec: ShardRecord) {
+    state
+        .shard_index
+        .entry(rec.file_id.clone())
+        .and_modify(|v| {
+            if let Some(existing) = v.iter_mut().find(|existing| {
+                existing.file_id == rec.file_id
+                    && existing.segment_index == rec.segment_index
+                    && existing.shard_index == rec.shard_index
+                    && existing.worker_id == rec.worker_id
+            }) {
+                *existing = rec.clone();
+            } else {
+                v.push(rec.clone());
+            }
+        })
+        .or_insert(vec![rec]);
+}
+
 async fn register_worker(
     state: axum::extract::State<AppState>,
     Json(req): Json<RegisterWorkerReq>,
@@ -292,12 +325,7 @@ async fn register_shard(
         .store
         .insert_shard(&req.record)
         .map_err(to_internal_error)?;
-
-    state
-        .shard_index
-        .entry(req.record.file_id.clone())
-        .and_modify(|v| v.push(req.record.clone()))
-        .or_insert(vec![req.record]);
+    upsert_shard_in_memory(&state, req.record);
     Ok(Json("ok"))
 }
 

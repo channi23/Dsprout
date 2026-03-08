@@ -3,6 +3,7 @@ mod store;
 use anyhow::Result;
 use dsprout_common::{
     hash,
+    models::{RegisterShardReq, ShardRecord},
     net::{
         DsproutEvent, build_swarm,
         hello::{NetRequest, NetResponse},
@@ -155,6 +156,51 @@ async fn post_json(url: &str, path: &str, payload: &impl Serialize) {
     }
 }
 
+async fn post_json_result(url: &str, path: &str, payload: &impl Serialize) -> Result<()> {
+    let endpoint = format!(
+        "{}/{}",
+        url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+    let client = reqwest::Client::new();
+    let res = client.post(endpoint).json(payload).send().await?;
+    res.error_for_status()?;
+    Ok(())
+}
+
+async fn reregister_local_shards(
+    satellite_url: &str,
+    worker_id: &str,
+    worker_multiaddr: &str,
+) -> Result<usize> {
+    let discovered = store::scan_local_shards()?;
+    let mut registered = 0usize;
+
+    for shard in discovered {
+        let req = RegisterShardReq {
+            record: ShardRecord {
+                worker_id: worker_id.to_string(),
+                worker_multiaddr: worker_multiaddr.to_string(),
+                file_id: shard.file_id,
+                segment_index: shard.segment_index,
+                shard_index: shard.shard_index,
+                shard_hash_hex: hash::blake3_hash_hex(&shard.bytes),
+            },
+        };
+
+        match post_json_result(satellite_url, "/register_shard", &req).await {
+            Ok(()) => {
+                registered += 1;
+            }
+            Err(err) => {
+                eprintln!("warning: failed to re-register shard at startup: {err}");
+            }
+        }
+    }
+
+    Ok(registered)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -172,6 +218,7 @@ async fn main() -> Result<()> {
     }
 
     let run = parse_run_args(&args)?;
+    store::set_store_profile(run.profile.clone());
     let hot_cache = store::HotCache::new();
 
     let swarm_key = dsprout_common::net::default_swarm_key_path(env!("CARGO_MANIFEST_DIR"));
@@ -189,6 +236,14 @@ async fn main() -> Result<()> {
         multiaddr: run.listen.to_string(),
     };
     post_json(&run.satellite_url, "/register_worker", &reg).await;
+    match reregister_local_shards(&run.satellite_url, &reg.worker_id, &reg.multiaddr).await {
+        Ok(count) => {
+            println!("Startup shard inventory re-registered: {count}");
+        }
+        Err(err) => {
+            eprintln!("warning: startup shard inventory scan failed: {err}");
+        }
+    }
 
     let satellite_url = run.satellite_url.clone();
     let heartbeat_payload = reg.clone();
