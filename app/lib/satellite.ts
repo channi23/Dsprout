@@ -80,6 +80,19 @@ export type DownloadApiResp = {
   file_bytes_base64: string;
 };
 
+export type RepairApiReq = {
+  file_id: string;
+  replication_factor?: number;
+};
+
+export type RepairApiResp = {
+  status: string;
+  file_id: string;
+  target_replication_factor: number;
+  repaired_shards: number;
+  new_replicas: number;
+};
+
 export function satelliteBaseUrl(): string {
   return process.env.SATELLITE_URL?.trim() || "http://127.0.0.1:7070";
 }

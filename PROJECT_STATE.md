@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last updated after Milestone 13.
+Last updated after Milestone 14.
 
 ## current architecture
 
@@ -21,38 +21,31 @@ Last updated after Milestone 13.
 - Frontend:
 - workers list/detail + contributor registration (Milestone 12)
 - file lookup/detail + upload form + download form (Milestone 13)
+- file health dashboard metrics + repair controls on file detail page (Milestone 14)
 
 ## files changed
 
-- `server/dsprout-satellite/src/main.rs`
-- Added thin file action API layer:
-- `POST /upload`
-- `POST /download`
-- `POST /repair` (optional)
-- Reuses existing uplink behavior by invoking `dsprout-uplink` binary from satellite process.
-- Returns structured JSON responses with file_id/hash/status and payload data for download.
-- Preserves existing worker/shard/manifest endpoints and SQLite persistence behavior.
-
-- `server/dsprout-satellite/Cargo.toml`
-- Added `base64` dependency and tokio `process`/`fs` features for file action endpoints.
-
 - `app/lib/satellite.ts`
-- Added typed request/response models for upload/download API integration.
-
-- `app/app/page.tsx`
-- Extended nav hub with file operation routes.
+- Added typed repair API request/response models:
+- `RepairApiReq`
+- `RepairApiResp`
 
 - `app/app/files/page.tsx`
-- Added file lookup/detail view via `/manifest` and `/locate`.
-
-- `app/app/files/upload/page.tsx`
-- Added upload form (file + optional file_id + replication_factor) posting to satellite `/upload`.
-
-- `app/app/files/download/page.tsx`
-- Added download form posting to satellite `/download` and save link for returned bytes.
+- Extended file detail view to show:
+- manifest summary
+- shard record count
+- unique shard count
+- replica min/max/avg
+- worker placement summary
+- health status (`healthy` / `degraded` / `under-replicated`)
+- Added repair control form with server action calling `POST /repair`.
+- Added repair result messages showing:
+- `repaired_shards`
+- `new_replicas`
+- Added post-repair redirect back to `/files?file_id=...` so health data is refreshed immediately.
 
 - `PROJECT_STATE.md`
-- Updated for Milestone 13.
+- Updated for Milestone 14.
 
 ## commands to run
 
@@ -84,7 +77,7 @@ SATELLITE_URL=http://127.0.0.1:7070 npm run dev
 
 Open: `http://localhost:3000`
 
-### 4) Milestone 13 direct API checks
+### 4) Milestone 14 direct API checks
 
 ```bash
 # upload
@@ -96,31 +89,30 @@ curl -s -X POST http://127.0.0.1:7070/upload \
 curl -s -X POST http://127.0.0.1:7070/download \
   -H 'content-type: application/json' \
   -d '{"file_id":"<FILE_ID>"}'
+
+# repair
+curl -s -X POST http://127.0.0.1:7070/repair \
+  -H 'content-type: application/json' \
+  -d '{"file_id":"<FILE_ID>","replication_factor":2}'
 ```
 
 ## validations passed
 
-Milestone 13 validation executed successfully:
+Milestone 14 validation executed successfully:
 
-- Backend compile passed with new file action endpoints.
-- Frontend lint passed with new upload/download/file pages.
-- Live HTTP endpoint test passed:
-- `POST /upload` succeeded
-- `POST /download` succeeded
-- downloaded bytes matched uploaded input exactly.
-
-Observed result set from validation run:
-- `UPLOAD_HTTP_OK=1`
-- `DOWNLOAD_HTTP_OK=1`
-- `FILE_ID=ui-b7f6651e-bd30-4e9a-8753-139c0958f67f`
-- `EQUAL=true`
-- `CMP_OK=1`
+- Frontend lint passed with Milestone 14 file health + repair UI changes.
+- Frontend production build passed after allowing networked build (Next.js font fetch during build).
+- Repair action wiring verified against existing satellite `POST /repair` response contract:
+- `target_replication_factor`
+- `repaired_shards`
+- `new_replicas`
 
 ## remaining warnings/issues
 
 - `/upload` and `/download` currently use base64 payloads/responses for minimal UI integration; large files are not optimized.
 - No auth on file action endpoints yet (intentionally out of scope for this milestone).
 - Satellite file actions assume local sibling `dsprout-uplink` binary availability.
+- File health status is computed from current `/manifest` + `/locate` data; no separate backend health endpoint exists yet.
 - Dashboard still does not include advanced queue/progress UX.
 - No desktop packaging/cloud deployment/protocol refactors yet (intentionally out of scope).
 
