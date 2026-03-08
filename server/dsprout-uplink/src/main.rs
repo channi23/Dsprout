@@ -46,9 +46,17 @@ struct DownloadArgs {
 }
 
 #[derive(Debug, Clone)]
+struct RepairArgs {
+    common: CommonArgs,
+    file_id: String,
+    replication_factor: usize,
+}
+
+#[derive(Debug, Clone)]
 enum Command {
     Upload(UploadArgs),
     Download(DownloadArgs),
+    Repair(RepairArgs),
 }
 
 struct SatelliteClient {
@@ -229,7 +237,7 @@ fn parse_command() -> Result<Command> {
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         return Err(anyhow::anyhow!(
-            "usage: dsprout-uplink <upload|download> [args]"
+            "usage: dsprout-uplink <upload|download|repair> [args]"
         ));
     }
 
@@ -315,6 +323,12 @@ fn parse_command() -> Result<Command> {
                 .ok_or_else(|| anyhow::anyhow!("--file-id is required for download"))?,
             output: output.ok_or_else(|| anyhow::anyhow!("--output is required for download"))?,
         })),
+        "repair" => Ok(Command::Repair(RepairArgs {
+            common,
+            file_id: file_id
+                .ok_or_else(|| anyhow::anyhow!("--file-id is required for repair"))?,
+            replication_factor,
+        })),
         _ => Err(anyhow::anyhow!("unknown subcommand: {subcommand}")),
     }
 }
@@ -386,30 +400,14 @@ async fn resolve_upload_workers(
     common: &CommonArgs,
     satellite: &SatelliteClient,
 ) -> Result<Vec<WorkerConnection>> {
-    let now = now_ms();
-    let mut worker_addrs: Vec<Multiaddr> = Vec::new();
-    let mut unhealthy = 0usize;
-    let mut invalid_addr = 0usize;
-    for w in satellite.workers().await? {
-        if now.saturating_sub(w.last_seen) > WORKER_HEALTH_MAX_AGE_MS {
-            unhealthy += 1;
-            continue;
-        }
-        match w.multiaddr.parse() {
-            Ok(addr) => worker_addrs.push(addr),
-            Err(_) => invalid_addr += 1,
-        }
-    }
+    let healthy_workers = discover_healthy_workers(satellite).await?;
+    let worker_addrs: Vec<Multiaddr> = healthy_workers
+        .iter()
+        .filter_map(|w| w.multiaddr.parse::<Multiaddr>().ok())
+        .collect();
 
     if worker_addrs.is_empty() {
         return Err(anyhow::anyhow!("no healthy workers discovered from /workers"));
-    }
-
-    if unhealthy > 0 || invalid_addr > 0 {
-        eprintln!(
-            "worker discovery filtered: unhealthy={} invalid_multiaddr={}",
-            unhealthy, invalid_addr
-        );
     }
 
     let mut out = Vec::new();
@@ -427,6 +425,232 @@ async fn resolve_upload_workers(
     }
 
     Ok(out)
+}
+
+async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<WorkerInfo>> {
+    let now = now_ms();
+    let mut healthy_workers = Vec::new();
+    let mut unhealthy = 0usize;
+    let mut invalid_addr = 0usize;
+    for w in satellite.workers().await? {
+        if now.saturating_sub(w.last_seen) > WORKER_HEALTH_MAX_AGE_MS {
+            unhealthy += 1;
+            continue;
+        }
+        match w.multiaddr.parse::<Multiaddr>() {
+            Ok(_) => healthy_workers.push(w),
+            Err(_) => {
+                invalid_addr += 1;
+            }
+        }
+    }
+
+    if healthy_workers.is_empty() {
+        return Err(anyhow::anyhow!("no healthy workers discovered from /workers"));
+    }
+
+    if unhealthy > 0 || invalid_addr > 0 {
+        eprintln!(
+            "worker discovery filtered: unhealthy={} invalid_multiaddr={}",
+            unhealthy, invalid_addr
+        );
+    }
+
+    Ok(healthy_workers)
+}
+
+async fn run_repair(args: RepairArgs) -> Result<()> {
+    if args.replication_factor == 0 {
+        return Err(anyhow::anyhow!(
+            "--replication-factor must be >= 1 for repair"
+        ));
+    }
+
+    let satellite = SatelliteClient::new(args.common.satellite_url.clone());
+    let locate = satellite.locate(&args.file_id).await?;
+    if locate.shards.is_empty() {
+        return Err(anyhow::anyhow!("satellite returned no shards for file"));
+    }
+
+    let healthy_workers = discover_healthy_workers(&satellite).await?;
+    let mut workers: HashMap<String, WorkerConnection> = HashMap::new();
+    for w in healthy_workers {
+        let Ok(addr) = w.multiaddr.parse::<Multiaddr>() else {
+            continue;
+        };
+        match connect_worker(&args.common, addr.clone()).await {
+            Ok(conn) => {
+                workers.insert(w.worker_id, conn);
+            }
+            Err(err) => {
+                eprintln!(
+                    "warning: healthy worker {} unreachable for repair ({addr}): {err}",
+                    w.worker_id
+                );
+            }
+        }
+    }
+
+    if workers.is_empty() {
+        return Err(anyhow::anyhow!("no healthy workers reachable for repair"));
+    }
+
+    let mut shard_groups: BTreeMap<(u32, u8), Vec<ShardRecord>> = BTreeMap::new();
+    for rec in locate.shards {
+        shard_groups
+            .entry((rec.segment_index, rec.shard_index))
+            .or_default()
+            .push(rec);
+    }
+
+    let mut total_shards = 0usize;
+    let mut repaired_shards = 0usize;
+    let mut new_replicas = 0usize;
+
+    for ((segment_index, shard_index), records) in shard_groups {
+        total_shards += 1;
+        let mut existing_ids: HashSet<String> = records.iter().map(|r| r.worker_id.clone()).collect();
+
+        let healthy_records: Vec<&ShardRecord> = records
+            .iter()
+            .filter(|r| workers.get(&r.worker_id).is_some_and(|w| w.online))
+            .collect();
+        let healthy_count = healthy_records
+            .iter()
+            .map(|r| r.worker_id.as_str())
+            .collect::<HashSet<_>>()
+            .len();
+
+        if healthy_count >= args.replication_factor {
+            continue;
+        }
+
+        let source = healthy_records.first().copied();
+        let Some(source) = source else {
+            eprintln!(
+                "warning: no healthy source for segment={} shard={}",
+                segment_index, shard_index
+            );
+            continue;
+        };
+
+        let bytes = {
+            let Some(source_conn) = workers.get_mut(&source.worker_id) else {
+                continue;
+            };
+            match source_conn
+                .client
+                .request(NetRequest::VerifyGet {
+                    file_id: args.file_id.clone(),
+                    segment_index,
+                    shard_index,
+                })
+                .await
+            {
+                Ok(NetResponse::VerifyGetOk { bytes, .. }) => bytes,
+                Ok(other) => {
+                    eprintln!(
+                        "warning: source verify_get unexpected segment={} shard={} worker={} resp={other:?}",
+                        segment_index, shard_index, source.worker_id
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    eprintln!(
+                        "warning: source verify_get failed segment={} shard={} worker={}: {}",
+                        segment_index, shard_index, source.worker_id, err
+                    );
+                    continue;
+                }
+            }
+        };
+
+        let actual_hash = hash::blake3_hash_hex(&bytes);
+        if actual_hash != source.shard_hash_hex {
+            eprintln!(
+                "warning: source hash mismatch for segment={} shard={} worker={}",
+                segment_index, shard_index, source.worker_id
+            );
+            continue;
+        }
+
+        let mut repaired_this = false;
+        let mut healthy_now = healthy_count;
+        for (worker_id, worker_conn) in workers.iter_mut() {
+            if healthy_now >= args.replication_factor {
+                break;
+            }
+            if existing_ids.contains(worker_id) || !worker_conn.online {
+                continue;
+            }
+
+            match worker_conn
+                .client
+                .request(NetRequest::StoreShard {
+                    file_id: args.file_id.clone(),
+                    segment_index,
+                    shard_index,
+                    bytes: bytes.clone(),
+                })
+                .await
+            {
+                Ok(NetResponse::StoreShardAck { stored: true, .. }) => {
+                    satellite
+                        .register_shard(ShardRecord {
+                            worker_id: worker_conn.worker_id.clone(),
+                            worker_multiaddr: worker_conn.multiaddr.to_string(),
+                            file_id: args.file_id.clone(),
+                            segment_index,
+                            shard_index,
+                            shard_hash_hex: actual_hash.clone(),
+                        })
+                        .await?;
+                    existing_ids.insert(worker_id.clone());
+                    healthy_now += 1;
+                    new_replicas += 1;
+                    repaired_this = true;
+                }
+                Ok(NetResponse::StoreShardAck { stored: false, .. }) => {
+                    eprintln!(
+                        "warning: repair store reported stored=false segment={} shard={} target={}",
+                        segment_index, shard_index, worker_id
+                    );
+                }
+                Ok(NetResponse::Error { message }) => {
+                    eprintln!(
+                        "warning: repair store error segment={} shard={} target={}: {}",
+                        segment_index, shard_index, worker_id, message
+                    );
+                }
+                Ok(other) => {
+                    eprintln!(
+                        "warning: repair store unexpected response segment={} shard={} target={}: {other:?}",
+                        segment_index, shard_index, worker_id
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "warning: repair store failed segment={} shard={} target={}: {}",
+                        segment_index, shard_index, worker_id, err
+                    );
+                    worker_conn.online = false;
+                }
+            }
+        }
+
+        if repaired_this {
+            repaired_shards += 1;
+        }
+    }
+
+    println!("Repair complete");
+    println!("file_id={}", args.file_id);
+    println!("target_replication_factor={}", args.replication_factor);
+    println!("healthy_workers_reachable={}", workers.len());
+    println!("total_shards={total_shards}");
+    println!("repaired_shards={repaired_shards}");
+    println!("new_replicas={new_replicas}");
+    Ok(())
 }
 
 async fn run_upload(args: UploadArgs) -> Result<()> {
@@ -769,5 +993,6 @@ async fn main() -> Result<()> {
     match parse_command()? {
         Command::Upload(args) => run_upload(args).await,
         Command::Download(args) => run_download(args).await,
+        Command::Repair(args) => run_repair(args).await,
     }
 }

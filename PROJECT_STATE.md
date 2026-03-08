@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last updated after Milestone 9.
+Last updated after Milestone 10.
 
 ## current architecture
 
@@ -14,9 +14,9 @@ Last updated after Milestone 9.
 - `server/dsprout-worker`:
 - libp2p worker node with profile-scoped local shard storage, RAM hot-cache, shard store/prepare/verify handlers, startup shard inventory scan + re-registration, registration + heartbeat.
 - `server/dsprout-uplink`:
-- libp2p client with satellite-driven worker discovery for upload (`GET /workers`), health filtering by `last_seen`, shard replication, signed manifest handling, and shard retrieval via `/locate` metadata.
+- libp2p client with satellite-driven upload worker discovery, health filtering, shard replication, signed manifest handling, download from `/locate`, and new file-scoped shard repair/re-replication command.
 - `server/dsprout-satellite`:
-- axum registry/index service for workers, shard locations, and signed manifests with SQLite-backed persistence and startup reload.
+- axum registry/index service for workers, shard locations, and signed manifests with SQLite persistence and startup reload.
 
 - Network protocol (request-response over private libp2p transport):
 - `Hello` / `HelloAck`
@@ -38,19 +38,24 @@ Last updated after Milestone 9.
 - SQLite database at `~/Library/Application Support/dsprout/satellite.sqlite3`
 - Persisted workers, shard records, signed manifests
 - Startup restores in-memory maps from SQLite
-- Shard registration remains idempotent/upsert-safe
+- Shard registration/upsert is duplicate-safe
 
 ## files changed
 
 - `server/dsprout-uplink/src/main.rs`
-- Upload worker selection now uses satellite discovery (`GET /workers`) only.
-- Removed manual `--worker` argument parsing from upload flow.
-- Added worker health filtering via `last_seen` (exclude workers older than 30 seconds).
-- Upload placement uses only discovered healthy workers.
-- Download flow continues dialing workers from `/locate` shard metadata.
+- Added `repair` subcommand (`dsprout-uplink repair --file-id ... --replication-factor ...`).
+- Repair flow:
+- queries `/locate` for file shard locations
+- groups records by shard identity `(segment_index, shard_index)`
+- computes healthy replica count per shard using healthy/reachable workers from `/workers`
+- for under-replicated shards, fetches bytes from one healthy source replica
+- chooses healthy target workers that do not already store that shard
+- stores shard on targets with `StoreShard`
+- registers new shard locations to satellite with `/register_shard`
+- Added helper for healthy worker discovery via `last_seen` threshold.
 
 - `PROJECT_STATE.md`
-- Updated architecture, commands, validations, and current milestone status.
+- Updated architecture, commands, and Milestone 10 validation.
 
 ## commands to run
 
@@ -63,89 +68,86 @@ cd server
 cargo build -p dsprout-common -p dsprout-satellite -p dsprout-worker -p dsprout-uplink
 ```
 
-### 2) Start satellite
+### 2) Start satellite and workers
 
 ```bash
 cd server
 cargo run -p dsprout-satellite
+cargo run -p dsprout-worker -- --profile w1 --listen /ip4/127.0.0.1/tcp/5701 --satellite-url http://127.0.0.1:7070
+cargo run -p dsprout-worker -- --profile w2 --listen /ip4/127.0.0.1/tcp/5702 --satellite-url http://127.0.0.1:7070
+cargo run -p dsprout-worker -- --profile w3 --listen /ip4/127.0.0.1/tcp/5703 --satellite-url http://127.0.0.1:7070
+cargo run -p dsprout-worker -- --profile w4 --listen /ip4/127.0.0.1/tcp/5704 --satellite-url http://127.0.0.1:7070
+cargo run -p dsprout-worker -- --profile w5 --listen /ip4/127.0.0.1/tcp/5705 --satellite-url http://127.0.0.1:7070
 ```
 
-### 3) Start workers
-
-```bash
-cd server
-cargo run -p dsprout-worker -- --profile w1 --listen /ip4/127.0.0.1/tcp/5601 --satellite-url http://127.0.0.1:7070
-cargo run -p dsprout-worker -- --profile w2 --listen /ip4/127.0.0.1/tcp/5602 --satellite-url http://127.0.0.1:7070
-cargo run -p dsprout-worker -- --profile w3 --listen /ip4/127.0.0.1/tcp/5603 --satellite-url http://127.0.0.1:7070
-cargo run -p dsprout-worker -- --profile w4 --listen /ip4/127.0.0.1/tcp/5604 --satellite-url http://127.0.0.1:7070
-```
-
-### 4) Upload using only satellite discovery (no `--worker` args)
+### 3) Upload with replication factor 2
 
 ```bash
 cd server
 cargo run -p dsprout-uplink -- upload \
   --satellite-url http://127.0.0.1:7070 \
   --input /tmp/input.bin \
-  --file-id milestone9-e2e \
+  --file-id milestone10-e2e \
   --replication-factor 2
 ```
 
-### 5) Download using only satellite URL + file ID
+### 4) Simulate replica loss (offline worker)
+
+```bash
+# stop one worker process (example: w1), then wait > 30s so it becomes unhealthy
+```
+
+### 5) Run repair / re-replication
+
+```bash
+cd server
+cargo run -p dsprout-uplink -- repair \
+  --satellite-url http://127.0.0.1:7070 \
+  --file-id milestone10-e2e \
+  --replication-factor 2
+```
+
+### 6) Download after repair and verify
 
 ```bash
 cd server
 cargo run -p dsprout-uplink -- download \
   --satellite-url http://127.0.0.1:7070 \
-  --file-id milestone9-e2e \
+  --file-id milestone10-e2e \
   --output /tmp/output.bin
-```
-
-### 6) Byte equality check
-
-```bash
 cmp -s /tmp/input.bin /tmp/output.bin && echo "MATCH" || echo "MISMATCH"
-```
-
-### 7) Offline-worker recovery check
-
-```bash
-# stop some workers, then run:
-cd server
-cargo run -p dsprout-uplink -- download \
-  --satellite-url http://127.0.0.1:7070 \
-  --file-id milestone9-e2e \
-  --output /tmp/output_offline.bin
-cmp -s /tmp/input.bin /tmp/output_offline.bin && echo "MATCH" || echo "MISMATCH"
 ```
 
 ## validations passed
 
-Milestone 9 validation executed successfully:
+Milestone 10 validation executed successfully:
 
-- Upload works with only `--satellite-url` (no manual `--worker` args).
-- Download works with only `--satellite-url` + `--file-id` + `--output`.
-- Download still succeeds with some workers offline.
-- Worker discovery health filtering is active (stale workers excluded by `last_seen`).
+- Upload with `replication_factor=2` succeeded.
+- One worker containing replicas was taken offline.
+- Repair command ran and created new replicas on healthy workers.
+- Healthy minimum replica count per shard was restored from 1 to 2.
+- Download after repair succeeded.
+- Restored file matched original exactly (`cmp` success).
 
 Observed result set from validation run:
-- `FILE_ID=milestone9-e2e-1772968430`
-- `UPLOAD_ONLY_SATELLITE_URL_OK=1`
-- `DOWNLOAD_ONLY_SATELLITE_URL_OK=1`
-- `DOWNLOAD_WITH_OFFLINE_WORKERS_OK=1`
-- `UNHEALTHY_FILTER_LOG=worker discovery filtered: unhealthy=4 invalid_multiaddr=0`
-- `CMP_ALL_OK=1`
-- `CMP_OFFLINE_OK=1`
+- `FILE_ID=milestone10-e2e-1772968696`
+- `UPLOAD_REP2_OK=1`
+- `WORKER_OFFLINE=1`
+- `HEALTHY_MIN_REPLICAS_BEFORE_REPAIR=1`
+- `REPAIR_RUN_OK=1`
+- `HEALTHY_MIN_REPLICAS_AFTER_REPAIR=2`
+- `REPAIRED_SHARDS=32`
+- `NEW_REPLICAS=32`
+- `DOWNLOAD_AFTER_REPAIR_OK=1`
+- `CMP_OK=1`
 
 ## remaining warnings/issues
 
-- Health threshold is fixed at 30 seconds in uplink (`WORKER_HEALTH_MAX_AGE_MS`), not yet configurable.
-- SQLite writes are synchronous and optimized for simplicity, not throughput.
-- No shard compaction/retention policy yet.
-- `server/swarm.key` is local secret material and intentionally git-ignored.
-- No Kademlia/bootstrap/gossipsub/discovery protocol yet (intentionally out of scope).
-- No frontend integration yet (intentionally out of scope).
-- No cloud deployment/performance optimization yet (intentionally out of scope).
+- Repair is file-scoped and best-effort; no scheduler/background repair loop yet.
+- Healthy threshold is fixed at 30 seconds in uplink (`WORKER_HEALTH_MAX_AGE_MS`).
+- Repair currently reuses immediate connectivity checks; no advanced retry/backoff strategy.
+- SQLite writes are synchronous and optimized for simplicity.
+- No Kademlia/bootstrap/gossipsub/cloud deployment/performance optimization yet (intentionally out of scope).
 
 ## next milestone start guidance
 
