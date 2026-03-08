@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "dsprout-common",
+  "dsprout-satellite",
+  "dsprout-worker",
+  "dsprout-uplink",
+]
+resolver = "2"

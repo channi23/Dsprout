@@ -1,0 +1,18 @@
+[package]
+name = "dsprout-common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+libp2p = { version = "0.54", features = ["ed25519", "identify", "macros", "tcp", "tokio", "noise", "yamux", "pnet", "request-response", "cbor"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+aes-gcm = "0.10"
+rand = "0.8"
+hkdf = "0.12"
+sha2 = "0.10"
+reed-solomon-erasure = "6"
+blake3 = "1"

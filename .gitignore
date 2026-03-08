@@ -1,0 +1,20 @@
+# Node / Next
+app/node_modules/
+app/.next/
+
+# Rust
+**/target/
+
+# Secrets / local keys
+server/swarm.key
+*.pem
+*.p12
+*.pfx
+*.key
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

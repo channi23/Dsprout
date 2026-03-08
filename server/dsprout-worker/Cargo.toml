@@ -1,0 +1,14 @@
+[package]
+name = "dsprout-worker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+dsprout-common = { path = "../dsprout-common" }
+dashmap = "6"
+blake3 = "1"
+dirs = "5"
+libp2p = { version = "0.54", features = ["identify", "request-response", "macros", "tokio"] }
+futures = "0.3"
