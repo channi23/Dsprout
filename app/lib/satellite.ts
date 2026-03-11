@@ -122,6 +122,7 @@ export type WorkerAgentStatusResp = {
   config: WorkerAgentConfig;
   satellite: WorkerAgentSatelliteView | null;
   identity_match: boolean | null;
+  multiaddr_match: boolean | null;
 };
 
 export type WorkerAgentStorageResp = {
@@ -131,15 +132,64 @@ export type WorkerAgentStorageResp = {
 };
 
 export function satelliteBaseUrl(): string {
-  return process.env.SATELLITE_URL?.trim() || "http://127.0.0.1:7070";
+  const url =
+    process.env.SATELLITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SATELLITE_URL?.trim();
+
+  if (!url) {
+    throw new Error(
+      "SATELLITE_URL is not configured. Set SATELLITE_URL or NEXT_PUBLIC_SATELLITE_URL in app/.env.local"
+    );
+  }
+
+  try {
+    new URL(url);
+  } catch {
+    throw new Error(
+      `SATELLITE_URL is invalid (${url}). Use a full URL like http://192.168.1.10:7070`
+    );
+  }
+
+  return url;
 }
 
 export function localAgentBaseUrl(): string {
-  return process.env.LOCAL_AGENT_URL?.trim() || "http://127.0.0.1:7081";
+  const url = process.env.LOCAL_AGENT_URL?.trim() || "http://127.0.0.1:7081";
+  try {
+    new URL(url);
+  } catch {
+    throw new Error(
+      `LOCAL_AGENT_URL is invalid (${url}). Use a full URL like http://127.0.0.1:7081`
+    );
+  }
+  return url;
+}
+
+export function actionableFetchError(err: unknown, targetUrl: string, context: string): Error {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+  const isNetwork =
+    lower.includes("fetch failed") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("econnrefused") ||
+    lower.includes("enotfound");
+  const base = `${context} failed: ${raw}. target=${targetUrl}`;
+  if (isNetwork) {
+    return new Error(
+      `${base}. Check the service is running and reachable from this machine, and confirm SATELLITE_URL/LOCAL_AGENT_URL points to the correct host:port.`
+    );
+  }
+  return new Error(base);
 }
 
 export async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (err) {
+    throw actionableFetchError(err, url, "GET request");
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`);
@@ -148,12 +198,17 @@ export async function fetchJson<T>(url: string): Promise<T> {
 }
 
 export async function postJson<TReq>(url: string, payload: TReq): Promise<void> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw actionableFetchError(err, url, "POST request");
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`);

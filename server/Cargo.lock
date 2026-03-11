@@ -650,6 +650,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "url",
  "urlencoding",
 ]
 
@@ -718,6 +719,7 @@ dependencies = [
  "reqwest",
  "serde",
  "tokio",
+ "url",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { satelliteBaseUrl, type DownloadApiResp } from "@/lib/satellite";
+import { actionableFetchError, satelliteBaseUrl, type DownloadApiResp } from "@/lib/satellite";
 
 type DownloadPageProps = {
   searchParams: Promise<{
@@ -39,7 +39,7 @@ async function downloadAction(formData: FormData) {
     }
     json = (await res.json()) as DownloadApiResp;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = actionableFetchError(err, `${satelliteBaseUrl()}/download`, "Download request").message;
     redirect(`/files/download?err=${encodeURIComponent(msg)}`);
   }
 

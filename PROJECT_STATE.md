@@ -167,6 +167,31 @@ Milestone 15 validation executed successfully:
 - Agent process/state is local-only and intentionally minimal (no desktop packaging, no cloud control plane yet).
 - No desktop packaging/cloud deployment/protocol refactors yet (intentionally out of scope).
 
+## troubleshooting (two-laptop LAN)
+
+- Model:
+- Shared satellite runs once on machine A.
+- Each contributor machine (including machine B) runs its own local `dsprout-agent` + `dsprout-worker`.
+- Frontend `/agent` controls only the local machine agent. Shared worker view is `/workers` via satellite.
+
+- Required LAN config:
+- On each contributor machine, set frontend `SATELLITE_URL` to machine A satellite URL (example: `http://192.168.1.10:7070`).
+- In local agent config, `advertise_multiaddr` must be a LAN-reachable IP (example: `/ip4/192.168.1.22/tcp/5901`).
+- Do not use advertise values with `127.x.x.x`, `localhost`, or `0.0.0.0`.
+
+- Verify machine B joined:
+- Open machine B `/agent`, confirm worker is running and `identity match` is `yes`.
+- Use `/contributors` on machine B and click `Register from Local Agent`.
+- Open machine A `/workers`; confirm machine B worker appears with fresh `last_seen_lag` and correct multiaddr.
+- Run an upload with `replication_factor=2`; confirm it does not fail with discovery/replication errors.
+
+- Common failures and meanings:
+- `satellite preflight failed`: agent cannot reach configured satellite URL.
+- `multiaddr cannot be loopback...`: worker is advertising non-LAN address; update advertise multiaddr.
+- `identity match: no`: local agent `worker_id` differs from satellite record for that entry.
+- `no healthy workers discovered...`: workers are stale/disabled/invalid address, or heartbeats are failing.
+- `replication factor X exceeds connected workers Y`: not enough reachable healthy workers for requested replication.
+
 ## next milestone start guidance
 
 When opening a new Codex session, paste this file first and ask for the next milestone only.

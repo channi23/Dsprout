@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{net::TcpListener, process::Child, process::Command, sync::Mutex};
+use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -49,12 +50,20 @@ impl Default for WorkerConfig {
         let profile = "worker".to_string();
         let worker_id = worker_id_for_profile(&profile).unwrap_or_else(|_| "".to_string());
         let listen_multiaddr = "/ip4/0.0.0.0/tcp/5901".to_string();
+        let satellite_url = std::env::var("DSPROUT_SATELLITE_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "http://127.0.0.1:7070".to_string());
+        let advertise_multiaddr = std::env::var("DSPROUT_ADVERTISE_MULTIADDR")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "/ip4/127.0.0.1/tcp/5901".to_string());
         Self {
             worker_id,
             profile,
             listen_multiaddr,
-            advertise_multiaddr: "/ip4/127.0.0.1/tcp/5901".to_string(),
-            satellite_url: "http://127.0.0.1:7070".to_string(),
+            advertise_multiaddr,
+            satellite_url,
             device_name: default_device_name(),
             owner_label: "Contributor".to_string(),
             capacity_limit_bytes: 1024 * 1024 * 1024,
@@ -82,6 +91,7 @@ struct WorkerStatusResp {
     config: WorkerConfig,
     satellite: Option<SatelliteWorkerView>,
     identity_match: Option<bool>,
+    multiaddr_match: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +139,71 @@ fn now_ms() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn parse_ip4_from_multiaddr(multiaddr: &str) -> Option<&str> {
+    let mut parts = multiaddr.split('/');
+    while let Some(part) = parts.next() {
+        if part == "ip4" {
+            return parts.next();
+        }
+    }
+    None
+}
+
+fn multiaddr_is_loopback_or_unspecified(multiaddr: &str) -> bool {
+    if let Some(ip) = parse_ip4_from_multiaddr(multiaddr) {
+        return ip == "0.0.0.0" || ip == "127.0.0.1" || ip.starts_with("127.");
+    }
+    multiaddr.to_ascii_lowercase().contains("localhost")
+}
+
+fn satellite_url_is_loopback(s: &str) -> bool {
+    let Ok(url) = Url::parse(s) else {
+        return false;
+    };
+    match url.host_str() {
+        Some("localhost") => true,
+        Some(host) if host == "127.0.0.1" || host.starts_with("127.") => true,
+        _ => false,
+    }
+}
+
+fn validate_runtime_config(cfg: &WorkerConfig) -> AnyResult<()> {
+    Url::parse(cfg.satellite_url.trim())
+        .map_err(|e| anyhow!("invalid satellite_url '{}': {e}", cfg.satellite_url))?;
+
+    if cfg.listen_multiaddr.trim().is_empty() {
+        return Err(anyhow!("listen_multiaddr cannot be empty"));
+    }
+    if cfg.advertise_multiaddr.trim().is_empty() {
+        return Err(anyhow!("advertise_multiaddr cannot be empty"));
+    }
+
+    if multiaddr_is_loopback_or_unspecified(&cfg.advertise_multiaddr)
+        && !satellite_url_is_loopback(&cfg.satellite_url)
+    {
+        return Err(anyhow!(
+            "advertise_multiaddr '{}' is loopback/unspecified while satellite_url '{}' is remote. Use a LAN IP multiaddr like /ip4/192.168.x.x/tcp/5901",
+            cfg.advertise_multiaddr,
+            cfg.satellite_url
+        ));
+    }
+    Ok(())
+}
+
+async fn preflight_satellite(satellite_url: &str) -> AnyResult<()> {
+    let endpoint = format!("{}/workers", satellite_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&endpoint)
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await
+        .map_err(|e| anyhow!("cannot reach satellite at {endpoint}: {e}"))?;
+    res.error_for_status()
+        .map_err(|e| anyhow!("satellite preflight failed at {endpoint}: {e}"))?;
+    Ok(())
 }
 
 fn to_http_err(err: impl std::fmt::Display) -> (StatusCode, String) {
@@ -242,6 +317,7 @@ fn snapshot_status(state: &AgentState) -> WorkerStatusResp {
         config: state.config.clone(),
         satellite: None,
         identity_match: None,
+        multiaddr_match: None,
     }
 }
 
@@ -290,11 +366,20 @@ async fn push_satellite_update(cfg: &WorkerConfig) -> AnyResult<()> {
         "enabled": cfg.enabled
     });
     let client = reqwest::Client::new();
+    println!(
+        "[agent] satellite update request worker_id={} endpoint={} advertise_multiaddr={}",
+        cfg.worker_id, endpoint, cfg.advertise_multiaddr
+    );
     let res = client.post(endpoint).json(&payload).send().await?;
     if res.status() == StatusCode::NOT_FOUND {
+        println!(
+            "[agent] satellite update skipped worker_id={} reason=not_found",
+            cfg.worker_id
+        );
         return Ok(());
     }
     res.error_for_status()?;
+    println!("[agent] satellite update ok worker_id={}", cfg.worker_id);
     Ok(())
 }
 
@@ -457,6 +542,9 @@ async fn status(State(state): State<AppState>) -> Json<WorkerStatusResp> {
     match fetch_satellite_worker(&cfg.satellite_url, &cfg.worker_id).await {
         Ok(satellite) => {
             out.identity_match = satellite.as_ref().map(|w| w.worker_id == cfg.worker_id);
+            out.multiaddr_match = satellite
+                .as_ref()
+                .map(|w| w.multiaddr == cfg.advertise_multiaddr);
             out.satellite = satellite;
         }
         Err(err) => {
@@ -486,6 +574,20 @@ async fn start(State(state): State<AppState>) -> Result<Json<ActionResp>, (Statu
         guard.config.clone()
     };
 
+    validate_runtime_config(&cfg)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid agent config: {e}")))?;
+    preflight_satellite(&cfg.satellite_url)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("satellite preflight failed: {e}")))?;
+
+    println!(
+        "[agent] start worker profile={} worker_id={} listen={} advertise={} satellite={}",
+        cfg.profile,
+        cfg.worker_id,
+        cfg.listen_multiaddr,
+        cfg.advertise_multiaddr,
+        cfg.satellite_url
+    );
     let child = spawn_worker(&cfg).map_err(to_http_err)?;
 
     let mut guard = state.inner.lock().await;
@@ -543,12 +645,23 @@ async fn config(
         refresh_process_state(&mut guard);
 
         apply_config_update(&mut guard.config, &req)?;
+        validate_runtime_config(&guard.config)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid agent config: {e}")))?;
         save_config(&guard.config).map_err(to_http_err)?;
 
         let restart = req.restart_if_running.unwrap_or(true) && guard.child.is_some();
         let old_child = if restart { guard.child.take() } else { None };
         (guard.config.clone(), restart, old_child)
     };
+
+    println!(
+        "[agent] config updated worker_id={} listen={} advertise={} satellite={} restart_if_running={}",
+        cfg.worker_id,
+        cfg.listen_multiaddr,
+        cfg.advertise_multiaddr,
+        cfg.satellite_url,
+        restart_if_running
+    );
 
     if let Some(child) = old_child.as_mut() {
         let _ = child.kill().await;
@@ -605,7 +718,12 @@ async fn storage(State(state): State<AppState>) -> Result<Json<StorageResp>, (St
 #[tokio::main]
 async fn main() -> AnyResult<()> {
     let cfg = load_config().unwrap_or_default();
-    let _ = save_config(&cfg);
+    if let Err(err) = validate_runtime_config(&cfg) {
+        eprintln!("[agent] startup config warning: {err}");
+    }
+    if let Err(err) = save_config(&cfg) {
+        eprintln!("[agent] failed to persist config: {err}");
+    }
     let state = AppState {
         inner: Arc::new(Mutex::new(AgentState {
             config: cfg,

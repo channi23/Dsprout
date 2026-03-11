@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { satelliteBaseUrl, type UploadApiReq, type UploadApiResp } from "@/lib/satellite";
+import {
+  actionableFetchError,
+  satelliteBaseUrl,
+  type UploadApiReq,
+  type UploadApiResp,
+} from "@/lib/satellite";
 
 type UploadPageProps = {
   searchParams: Promise<{
@@ -53,9 +58,8 @@ async function uploadAction(formData: FormData) {
     }
     json = (await res.json()) as UploadApiResp;
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    const msg = `${raw}. target=${targetUrl}. If satellite is on another machine, set SATELLITE_URL to that machine IP.`;
-    console.error(`[uploadAction] error target=${targetUrl} message=${raw}`);
+    const msg = actionableFetchError(err, targetUrl, "Upload request").message;
+    console.error(`[uploadAction] error target=${targetUrl} message=${msg}`);
     redirect(`/files/upload?err=${encodeURIComponent(msg)}`);
   }
 

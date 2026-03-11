@@ -13,6 +13,7 @@ use futures::StreamExt;
 use libp2p::{Multiaddr, request_response, swarm::SwarmEvent};
 use serde::Serialize;
 use std::env;
+use url::Url;
 
 #[derive(Debug, Clone)]
 struct RunArgs {
@@ -117,7 +118,10 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs> {
     let mut profile = "worker".to_string();
     let mut listen: Multiaddr = "/ip4/0.0.0.0/tcp/4001".parse()?;
     let mut advertise_multiaddr: Option<Multiaddr> = None;
-    let mut satellite_url = "http://127.0.0.1:7070".to_string();
+    let mut satellite_url = std::env::var("DSPROUT_SATELLITE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:7070".to_string());
     let mut device_name: Option<String> = None;
     let mut owner_label = "local-contributor".to_string();
     let mut capacity_limit_bytes: u64 = 10 * 1024 * 1024 * 1024;
@@ -211,8 +215,15 @@ async fn post_json(url: &str, path: &str, payload: &impl Serialize) {
         path.trim_start_matches('/')
     );
     let client = reqwest::Client::new();
-    if let Err(err) = client.post(endpoint).json(payload).send().await {
-        eprintln!("satellite call failed: {err}");
+    match client.post(&endpoint).json(payload).send().await {
+        Ok(res) => {
+            if let Err(err) = res.error_for_status_ref() {
+                eprintln!("satellite call failed endpoint={endpoint}: {err}");
+            }
+        }
+        Err(err) => {
+            eprintln!("satellite call failed endpoint={endpoint}: {err}");
+        }
     }
 }
 
@@ -268,6 +279,36 @@ fn used_bytes_from_local_scan() -> u64 {
     }
 }
 
+fn parse_ip4_from_multiaddr(multiaddr: &Multiaddr) -> Option<String> {
+    let s = multiaddr.to_string();
+    let mut parts = s.split('/');
+    while let Some(part) = parts.next() {
+        if part == "ip4" {
+            return parts.next().map(ToString::to_string);
+        }
+    }
+    None
+}
+
+fn multiaddr_is_loopback_or_unspecified(addr: &Multiaddr) -> bool {
+    let s = addr.to_string();
+    if let Some(ip) = parse_ip4_from_multiaddr(addr) {
+        return ip == "0.0.0.0" || ip == "127.0.0.1" || ip.starts_with("127.");
+    }
+    s.to_ascii_lowercase().contains("localhost")
+}
+
+fn satellite_url_is_loopback(s: &str) -> bool {
+    let Ok(url) = Url::parse(s) else {
+        return false;
+    };
+    match url.host_str() {
+        Some("localhost") => true,
+        Some(host) if host == "127.0.0.1" || host.starts_with("127.") => true,
+        _ => false,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -298,6 +339,15 @@ async fn main() -> Result<()> {
         .advertise_multiaddr
         .clone()
         .unwrap_or_else(|| run.listen.clone());
+    if multiaddr_is_loopback_or_unspecified(&advertised_multiaddr)
+        && !satellite_url_is_loopback(&run.satellite_url)
+    {
+        return Err(anyhow::anyhow!(
+            "invalid advertise_multiaddr {} for remote satellite {}. Use LAN IP multiaddr like /ip4/192.168.x.x/tcp/5901",
+            advertised_multiaddr,
+            run.satellite_url
+        ));
+    }
     println!("Worker peer id: {worker_id}");
     println!("Worker profile: {}", run.profile);
     println!("Worker listening on: {}", run.listen);
@@ -312,6 +362,10 @@ async fn main() -> Result<()> {
         used_bytes: used_bytes_from_local_scan(),
         enabled: run.enabled,
     };
+    println!(
+        "Registering worker in satellite: worker_id={} satellite_url={} multiaddr={}",
+        reg.worker_id, run.satellite_url, reg.multiaddr
+    );
     post_json(&run.satellite_url, "/register_worker", &reg).await;
     match reregister_local_shards(&run.satellite_url, &reg.worker_id, &reg.multiaddr).await {
         Ok(count) => {
@@ -338,6 +392,11 @@ async fn main() -> Result<()> {
             ticker.tick().await;
             let mut payload = heartbeat_base.clone();
             payload.used_bytes = Some(used_bytes_from_local_scan());
+            println!(
+                "Sending heartbeat: worker_id={} used_bytes={}",
+                payload.worker_id,
+                payload.used_bytes.unwrap_or(0)
+            );
             post_json(&satellite_url, "/heartbeat", &payload).await;
         }
     });

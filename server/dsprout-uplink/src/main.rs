@@ -241,7 +241,10 @@ fn parse_command() -> Result<Command> {
     }
 
     let subcommand = args.remove(0);
-    let mut satellite_url: String = "http://127.0.0.1:7070".to_string();
+    let mut satellite_url: String = std::env::var("DSPROUT_SATELLITE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:7070".to_string());
     let mut swarm_key: Option<PathBuf> = None;
 
     let mut input: Option<PathBuf> = None;
@@ -399,6 +402,11 @@ async fn resolve_upload_workers(
     satellite: &SatelliteClient,
 ) -> Result<Vec<WorkerConnection>> {
     let healthy_workers = discover_healthy_workers(satellite).await?;
+    println!(
+        "worker discovery: healthy_workers={} satellite_url={}",
+        healthy_workers.len(),
+        common.satellite_url
+    );
     let worker_addrs: Vec<Multiaddr> = healthy_workers
         .iter()
         .filter_map(|w| w.multiaddr.parse::<Multiaddr>().ok())
@@ -421,7 +429,9 @@ async fn resolve_upload_workers(
     }
 
     if out.is_empty() {
-        return Err(anyhow::anyhow!("failed to connect to any worker"));
+        return Err(anyhow::anyhow!(
+            "failed to connect to any discovered healthy worker; verify worker advertise_multiaddr and LAN reachability"
+        ));
     }
 
     Ok(out)
@@ -429,11 +439,13 @@ async fn resolve_upload_workers(
 
 async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<WorkerInfo>> {
     let now = now_ms();
+    let all_workers = satellite.workers().await?;
+    let total = all_workers.len();
     let mut healthy_workers = Vec::new();
     let mut unhealthy = 0usize;
     let mut invalid_addr = 0usize;
     let mut disabled = 0usize;
-    for w in satellite.workers().await? {
+    for w in all_workers {
         if !w.enabled {
             disabled += 1;
             continue;
@@ -452,7 +464,7 @@ async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<Wor
 
     if healthy_workers.is_empty() {
         return Err(anyhow::anyhow!(
-            "no healthy workers discovered from /workers"
+            "no healthy workers discovered from /workers (total={total}, disabled={disabled}, stale={unhealthy}, invalid_multiaddr={invalid_addr})"
         ));
     }
 
@@ -662,6 +674,12 @@ async fn run_repair(args: RepairArgs) -> Result<()> {
 }
 
 async fn run_upload(args: UploadArgs) -> Result<()> {
+    println!(
+        "upload start: satellite_url={} replication_factor={} input={}",
+        args.common.satellite_url,
+        args.replication_factor,
+        args.input.display()
+    );
     let satellite = SatelliteClient::new(args.common.satellite_url.clone());
     let mut workers = resolve_upload_workers(&args.common, &satellite).await?;
     if args.replication_factor == 0 {
@@ -670,10 +688,16 @@ async fn run_upload(args: UploadArgs) -> Result<()> {
         ));
     }
     if args.replication_factor > workers.len() {
+        let worker_ids = workers
+            .iter()
+            .map(|w| w.worker_id.clone())
+            .collect::<Vec<_>>()
+            .join(",");
         return Err(anyhow::anyhow!(
-            "replication factor {} exceeds connected workers {}",
+            "replication factor {} exceeds connected workers {} (worker_ids={})",
             args.replication_factor,
-            workers.len()
+            workers.len(),
+            worker_ids
         ));
     }
 

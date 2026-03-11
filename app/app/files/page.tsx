@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  actionableFetchError,
   fetchJson,
   satelliteBaseUrl,
   type LocateResp,
@@ -36,6 +37,7 @@ async function repairAction(formData: FormData) {
     redirect("/files?repair_err=file_id+is+required");
   }
 
+  let okUrl: string;
   try {
     const base = satelliteBaseUrl();
     const res = await fetch(`${base}/repair`, {
@@ -51,15 +53,14 @@ async function repairAction(formData: FormData) {
       throw new Error(await res.text());
     }
     const json = (await res.json()) as RepairApiResp;
-    redirect(
-      `/files?file_id=${encodeURIComponent(fileId)}&repair_ok=1&target_rf=${
-        json.target_replication_factor
-      }&repaired_shards=${json.repaired_shards}&new_replicas=${json.new_replicas}`,
-    );
+    okUrl = `/files?file_id=${encodeURIComponent(fileId)}&repair_ok=1&target_rf=${
+      json.target_replication_factor
+    }&repaired_shards=${json.repaired_shards}&new_replicas=${json.new_replicas}`;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = actionableFetchError(err, `${satelliteBaseUrl()}/repair`, "Repair request").message;
     redirect(`/files?file_id=${encodeURIComponent(fileId)}&repair_err=${encodeURIComponent(msg)}`);
   }
+  redirect(okUrl);
 }
 
 export default async function FilesPage({ searchParams }: FileLookupPageProps) {

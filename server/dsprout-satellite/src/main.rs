@@ -377,6 +377,37 @@ fn to_internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
+fn satellite_public_url() -> String {
+    std::env::var("DSPROUT_PUBLIC_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::env::var("DSPROUT_SATELLITE_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        })
+        .unwrap_or_else(|| "http://127.0.0.1:7070".to_string())
+}
+
+fn validate_worker_multiaddr_for_registration(multiaddr: &str) -> Result<(), (StatusCode, String)> {
+    if multiaddr.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "multiaddr is required".to_string()));
+    }
+    if multiaddr.contains("/ip4/0.0.0.0/") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "multiaddr cannot be /ip4/0.0.0.0/...; advertise a reachable LAN IP".to_string(),
+        ));
+    }
+    if multiaddr.contains("/ip4/127.") || multiaddr.to_ascii_lowercase().contains("localhost") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "multiaddr cannot be loopback for shared-LAN workers; advertise a LAN IP like /ip4/192.168.x.x/tcp/5901".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn upsert_shard_in_memory(state: &AppState, rec: ShardRecord) {
     state
         .shard_index
@@ -435,6 +466,11 @@ async fn register_worker(
     state: axum::extract::State<AppState>,
     Json(req): Json<RegisterWorkerReq>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
+    validate_worker_multiaddr_for_registration(&req.multiaddr)?;
+    println!(
+        "[satellite] register_worker worker_id={} multiaddr={} device_name={} owner_label={} enabled={}",
+        req.worker_id, req.multiaddr, req.device_name, req.owner_label, req.enabled
+    );
     let worker = WorkerInfo {
         worker_id: req.worker_id.clone(),
         multiaddr: req.multiaddr,
@@ -458,6 +494,18 @@ async fn update_worker(
     state: axum::extract::State<AppState>,
     Json(req): Json<UpdateWorkerReq>,
 ) -> Result<Json<WorkerInfo>, (StatusCode, String)> {
+    if let Some(addr) = req.multiaddr.as_deref() {
+        validate_worker_multiaddr_for_registration(addr)?;
+    }
+    println!(
+        "[satellite] update_worker worker_id={} multiaddr={} device_name={} enabled={}",
+        req.worker_id,
+        req.multiaddr.clone().unwrap_or_else(|| "(unchanged)".to_string()),
+        req.device_name.clone().unwrap_or_else(|| "(unchanged)".to_string()),
+        req.enabled
+            .map(|v| if v { "true" } else { "false" })
+            .unwrap_or("(unchanged)")
+    );
     let existing = state
         .workers
         .get(&req.worker_id)
@@ -511,6 +559,18 @@ async fn heartbeat(
     state: axum::extract::State<AppState>,
     Json(req): Json<HeartbeatReq>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
+    validate_worker_multiaddr_for_registration(&req.multiaddr)?;
+    println!(
+        "[satellite] heartbeat worker_id={} multiaddr={} used_bytes={} enabled={}",
+        req.worker_id,
+        req.multiaddr,
+        req.used_bytes
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "(unchanged)".to_string()),
+        req.enabled
+            .map(|v| if v { "true" } else { "false" })
+            .unwrap_or("(unchanged)")
+    );
     let now = now_ms();
     let existing = state.workers.get(&req.worker_id).map(|v| v.clone());
 
@@ -639,10 +699,11 @@ async fn upload_action(
         tmp_input.display()
     );
 
+    let satellite_url = satellite_public_url();
     let args = vec![
         "upload".to_string(),
         "--satellite-url".to_string(),
-        "http://127.0.0.1:7070".to_string(),
+        satellite_url.clone(),
         "--input".to_string(),
         tmp_input.to_string_lossy().to_string(),
         "--file-id".to_string(),
@@ -657,10 +718,11 @@ async fn upload_action(
     }
 
     println!(
-        "[/upload] success file_id={} bytes={} replication_factor={}",
+        "[/upload] success file_id={} bytes={} replication_factor={} satellite_url={}",
         file_id,
         file_bytes.len(),
-        replication_factor
+        replication_factor,
+        satellite_url
     );
 
     Ok(Json(UploadResp {
@@ -676,10 +738,11 @@ async fn download_action(
     Json(req): Json<DownloadReq>,
 ) -> Result<Json<DownloadResp>, (StatusCode, String)> {
     let tmp_output = std::env::temp_dir().join(format!("dsprout-ui-download-{}.bin", req.file_id));
+    let satellite_url = satellite_public_url();
     let args = vec![
         "download".to_string(),
         "--satellite-url".to_string(),
-        "http://127.0.0.1:7070".to_string(),
+        satellite_url.clone(),
         "--file-id".to_string(),
         req.file_id.clone(),
         "--output".to_string(),
@@ -712,10 +775,11 @@ async fn repair_action(
     Json(req): Json<RepairReq>,
 ) -> Result<Json<RepairResp>, (StatusCode, String)> {
     let target = req.replication_factor.unwrap_or(2);
+    let satellite_url = satellite_public_url();
     let args = vec![
         "repair".to_string(),
         "--satellite-url".to_string(),
-        "http://127.0.0.1:7070".to_string(),
+        satellite_url.clone(),
         "--file-id".to_string(),
         req.file_id.clone(),
         "--replication-factor".to_string(),
@@ -808,6 +872,7 @@ async fn main() -> AnyResult<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:7070").await?;
+    println!("Satellite uplink base URL: {}", satellite_public_url());
     println!("Satellite running on http://localhost:7070");
     axum::serve(listener, app).await?;
     Ok(())

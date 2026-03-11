@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  actionableFetchError,
   fetchJson,
   formatBytes,
   localAgentBaseUrl,
@@ -16,14 +17,23 @@ export const dynamic = "force-dynamic";
 
 async function postAgent(path: string, payload?: unknown) {
   const base = localAgentBaseUrl();
-  const res = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    cache: "no-store",
-    body: payload === undefined ? "{}" : JSON.stringify(payload),
-  });
+  const target = `${base}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: payload === undefined ? "{}" : JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw actionableFetchError(err, target, "Local agent request");
+  }
   if (!res.ok) {
-    throw new Error(await res.text());
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Local agent request failed: ${res.status} ${res.statusText}${body ? ` - ${body}` : ""}. target=${target}`
+    );
   }
 }
 
@@ -31,22 +41,22 @@ async function startWorkerAction() {
   "use server";
   try {
     await postAgent("/start");
-    redirect("/agent?ok=1&msg=worker+started");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     redirect(`/agent?err=${encodeURIComponent(msg)}`);
   }
+  redirect("/agent?ok=1&msg=worker+started");
 }
 
 async function stopWorkerAction() {
   "use server";
   try {
     await postAgent("/stop");
-    redirect("/agent?ok=1&msg=worker+stopped");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     redirect(`/agent?err=${encodeURIComponent(msg)}`);
   }
+  redirect("/agent?ok=1&msg=worker+stopped");
 }
 
 async function updateConfigAction(formData: FormData) {
@@ -81,11 +91,11 @@ async function updateConfigAction(formData: FormData) {
       capacity_limit_bytes: capacity,
       restart_if_running: restartIfRunning,
     });
-    redirect("/agent?ok=1&msg=config+updated");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     redirect(`/agent?err=${encodeURIComponent(msg)}`);
   }
+  redirect("/agent?ok=1&msg=config+updated");
 }
 
 export default async function AgentPage({ searchParams }: AgentPageProps) {
@@ -102,7 +112,7 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
       fetchJson<WorkerAgentStorageResp>(`${base}/storage`),
     ]);
   } catch (err) {
-    loadError = err instanceof Error ? err.message : String(err);
+    loadError = actionableFetchError(err, `${localAgentBaseUrl()}/status`, "Load agent status").message;
   }
 
   return (
@@ -166,12 +176,30 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
           </p>
           <p>
             <span className="font-semibold">identity match:</span>{" "}
-            {status.identity_match === null ? "-" : status.identity_match ? "yes" : "no"}
+            {status.identity_match === null ? (
+              "-"
+            ) : status.identity_match ? (
+              <span className="text-green-700">yes</span>
+            ) : (
+              <span className="text-red-700">no (local worker_id differs from satellite record)</span>
+            )}
           </p>
           <p>
             <span className="font-semibold">satellite multiaddr:</span>{" "}
             <span className="font-mono">{status.satellite?.multiaddr || "-"}</span>
           </p>
+          {status.satellite && status.satellite.multiaddr !== status.config.advertise_multiaddr ? (
+            <p className="text-red-700">
+              satellite multiaddr mismatch: local advertise is{" "}
+              <span className="font-mono">{status.config.advertise_multiaddr}</span>
+            </p>
+          ) : null}
+          {status.config.advertise_multiaddr.includes("/ip4/127.") ||
+          status.config.advertise_multiaddr.includes("/ip4/0.0.0.0/") ? (
+            <p className="text-red-700">
+              advertise_multiaddr is loopback/unspecified. For shared LAN workers, advertise your machine LAN IP.
+            </p>
+          ) : null}
           <p>
             <span className="font-semibold">last_exit_code:</span> {status.last_exit_code ?? "-"}
           </p>
