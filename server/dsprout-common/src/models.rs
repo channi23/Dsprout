@@ -72,7 +72,9 @@ impl SignedManifest {
             .map_err(|e| anyhow!("invalid uploader public key: {e}"))?;
         let expected_peer_id = PeerId::from(public.clone()).to_string();
         if self.uploader_peer_id != expected_peer_id {
-            return Err(anyhow!("uploader_peer_id does not match uploader public key"));
+            return Err(anyhow!(
+                "uploader_peer_id does not match uploader public key"
+            ));
         }
 
         let signing_bytes = self.manifest.signing_bytes()?;

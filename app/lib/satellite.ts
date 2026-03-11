@@ -94,12 +94,22 @@ export type RepairApiResp = {
 };
 
 export type WorkerAgentConfig = {
+  worker_id: string;
   profile: string;
   listen_multiaddr: string;
+  advertise_multiaddr: string;
   satellite_url: string;
   device_name: string;
   owner_label: string;
   capacity_limit_bytes: number;
+  enabled: boolean;
+};
+
+export type WorkerAgentSatelliteView = {
+  worker_id: string;
+  multiaddr: string;
+  device_name: string;
+  owner_label: string;
   enabled: boolean;
 };
 
@@ -110,6 +120,8 @@ export type WorkerAgentStatusResp = {
   last_exit_code: number | null;
   last_error: string | null;
   config: WorkerAgentConfig;
+  satellite: WorkerAgentSatelliteView | null;
+  identity_match: boolean | null;
 };
 
 export type WorkerAgentStorageResp = {

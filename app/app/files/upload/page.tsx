@@ -3,13 +3,22 @@ import { redirect } from "next/navigation";
 import { satelliteBaseUrl, type UploadApiReq, type UploadApiResp } from "@/lib/satellite";
 
 type UploadPageProps = {
-  searchParams: Promise<{ ok?: string; err?: string; file_id?: string; hash?: string; bytes?: string }>;
+  searchParams: Promise<{
+    ok?: string;
+    err?: string;
+    file_id?: string;
+    hash?: string;
+    bytes?: string;
+    replication_factor?: string;
+  }>;
 };
 
 export const dynamic = "force-dynamic";
 
 async function uploadAction(formData: FormData) {
   "use server";
+  // Temporary local-dev approach: file bytes pass through a Server Action.
+  // Better long-term: stream large uploads via a dedicated Route Handler/API endpoint.
 
   const file = formData.get("file") as File | null;
   if (!file) {
@@ -23,36 +32,49 @@ async function uploadAction(formData: FormData) {
     replication_factor: Number(formData.get("replication_factor") || 2),
   };
 
+  const base = satelliteBaseUrl();
+  const targetUrl = `${base}/upload`;
+  console.log(
+    `[uploadAction] start target=${targetUrl} bytes=${bytes.length} file_id=${payload.file_id || "(auto)"}`,
+  );
+
+  let json: UploadApiResp;
   try {
-    const base = satelliteBaseUrl();
-    const res = await fetch(`${base}/upload`, {
+    const res = await fetch(targetUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
+    console.log(`[uploadAction] response target=${targetUrl} status=${res.status}`);
     if (!res.ok) {
-      throw new Error(await res.text());
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`);
     }
-    const json = (await res.json()) as UploadApiResp;
-    redirect(
-      `/files/upload?ok=1&file_id=${encodeURIComponent(json.file_id)}&hash=${encodeURIComponent(
-        json.input_hash,
-      )}&bytes=${json.bytes}`,
-    );
+    json = (await res.json()) as UploadApiResp;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const raw = err instanceof Error ? err.message : String(err);
+    const msg = `${raw}. target=${targetUrl}. If satellite is on another machine, set SATELLITE_URL to that machine IP.`;
+    console.error(`[uploadAction] error target=${targetUrl} message=${raw}`);
     redirect(`/files/upload?err=${encodeURIComponent(msg)}`);
   }
+
+  redirect(
+    `/files/upload?ok=1&file_id=${encodeURIComponent(json.file_id)}&hash=${encodeURIComponent(
+      json.input_hash,
+    )}&bytes=${json.bytes}&replication_factor=${json.replication_factor}`,
+  );
 }
 
 export default async function UploadPage({ searchParams }: UploadPageProps) {
   const params = await searchParams;
+  const targetUrl = `${satelliteBaseUrl()}/upload`;
 
   return (
     <main className="min-h-screen p-6 md:p-10">
       <h1 className="text-2xl font-semibold">Upload File</h1>
       <p className="mt-1 text-sm text-gray-600">HTTP-backed upload through satellite `/upload`.</p>
+      <p className="mt-1 text-xs text-gray-500">Target URL: {targetUrl}</p>
 
       <div className="mt-4 flex gap-3 text-sm">
         <Link className="underline" href="/">
@@ -68,10 +90,13 @@ export default async function UploadPage({ searchParams }: UploadPageProps) {
 
       {params.ok ? (
         <p className="mt-4 text-sm text-green-700">
-          Upload successful: file_id={params.file_id} hash={params.hash} bytes={params.bytes}
+          Upload succeeded: file_id={params.file_id} bytes={params.bytes} replication_factor={params.replication_factor}
+          {params.hash ? ` input_hash=${params.hash}` : ""}
         </p>
       ) : null}
-      {params.err ? <p className="mt-4 text-sm text-red-700">{decodeURIComponent(params.err)}</p> : null}
+      {params.ok ? null : params.err ? (
+        <p className="mt-4 text-sm text-red-700">{decodeURIComponent(params.err)}</p>
+      ) : null}
 
       <form action={uploadAction} className="mt-6 grid max-w-2xl gap-3 text-sm">
         <label>

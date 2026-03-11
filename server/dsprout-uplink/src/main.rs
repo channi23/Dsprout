@@ -1,10 +1,9 @@
 use anyhow::Result;
 use dsprout_common::{
-    crypto, hash,
-    identity,
+    crypto, hash, identity,
     models::{
         FileManifest, LocateResp, ManifestSegment, RS_K, RS_N, RegisterManifestReq,
-        RegisterShardReq, ShardRecord, SignedManifest, WorkerInfo, SEGMENT_SIZE,
+        RegisterShardReq, SEGMENT_SIZE, ShardRecord, SignedManifest, WorkerInfo,
     },
     net::{
         DsproutBehaviour, DsproutEvent, build_swarm,
@@ -325,8 +324,7 @@ fn parse_command() -> Result<Command> {
         })),
         "repair" => Ok(Command::Repair(RepairArgs {
             common,
-            file_id: file_id
-                .ok_or_else(|| anyhow::anyhow!("--file-id is required for repair"))?,
+            file_id: file_id.ok_or_else(|| anyhow::anyhow!("--file-id is required for repair"))?,
             replication_factor,
         })),
         _ => Err(anyhow::anyhow!("unknown subcommand: {subcommand}")),
@@ -407,7 +405,9 @@ async fn resolve_upload_workers(
         .collect();
 
     if worker_addrs.is_empty() {
-        return Err(anyhow::anyhow!("no healthy workers discovered from /workers"));
+        return Err(anyhow::anyhow!(
+            "no healthy workers discovered from /workers"
+        ));
     }
 
     let mut out = Vec::new();
@@ -451,7 +451,9 @@ async fn discover_healthy_workers(satellite: &SatelliteClient) -> Result<Vec<Wor
     }
 
     if healthy_workers.is_empty() {
-        return Err(anyhow::anyhow!("no healthy workers discovered from /workers"));
+        return Err(anyhow::anyhow!(
+            "no healthy workers discovered from /workers"
+        ));
     }
 
     if unhealthy > 0 || invalid_addr > 0 || disabled > 0 {
@@ -514,7 +516,8 @@ async fn run_repair(args: RepairArgs) -> Result<()> {
 
     for ((segment_index, shard_index), records) in shard_groups {
         total_shards += 1;
-        let mut existing_ids: HashSet<String> = records.iter().map(|r| r.worker_id.clone()).collect();
+        let mut existing_ids: HashSet<String> =
+            records.iter().map(|r| r.worker_id.clone()).collect();
 
         let healthy_records: Vec<&ShardRecord> = records
             .iter()
@@ -972,8 +975,8 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
     fs::write(&args.output, &restored)?;
 
     let restored_hash_hex = hash::blake3_hash_hex(&restored);
-    let equal =
-        restored_hash_hex == manifest.original_hash_hex && restored.len() as u64 == manifest.original_len;
+    let equal = restored_hash_hex == manifest.original_hash_hex
+        && restored.len() as u64 == manifest.original_len;
 
     println!("Download complete");
     println!("file_id={}", manifest.file_id);

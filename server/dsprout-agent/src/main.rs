@@ -5,7 +5,9 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use dsprout_common::identity;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -15,9 +17,12 @@ use std::{
 use tokio::{net::TcpListener, process::Child, process::Command, sync::Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 struct WorkerConfig {
+    worker_id: String,
     profile: String,
     listen_multiaddr: String,
+    advertise_multiaddr: String,
     satellite_url: String,
     device_name: String,
     owner_label: String,
@@ -25,18 +30,46 @@ struct WorkerConfig {
     enabled: bool,
 }
 
+fn default_device_name() -> String {
+    std::env::var("DSPROUT_DEVICE_NAME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .unwrap_or_else(|| "worker-device".to_string())
+}
+
+fn worker_id_for_profile(profile: &str) -> AnyResult<String> {
+    let kp = identity::load_or_create_keypair_for(profile)?;
+    Ok(identity::peer_id_from_keypair(&kp).to_string())
+}
+
 impl Default for WorkerConfig {
     fn default() -> Self {
+        let profile = "worker".to_string();
+        let worker_id = worker_id_for_profile(&profile).unwrap_or_else(|_| "".to_string());
+        let listen_multiaddr = "/ip4/0.0.0.0/tcp/5901".to_string();
         Self {
-            profile: "worker".to_string(),
-            listen_multiaddr: "/ip4/127.0.0.1/tcp/5901".to_string(),
+            worker_id,
+            profile,
+            listen_multiaddr,
+            advertise_multiaddr: "/ip4/127.0.0.1/tcp/5901".to_string(),
             satellite_url: "http://127.0.0.1:7070".to_string(),
-            device_name: "Local Worker".to_string(),
+            device_name: default_device_name(),
             owner_label: "Contributor".to_string(),
             capacity_limit_bytes: 1024 * 1024 * 1024,
             enabled: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SatelliteWorkerView {
+    worker_id: String,
+    multiaddr: String,
+    device_name: String,
+    owner_label: String,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +80,8 @@ struct WorkerStatusResp {
     last_exit_code: Option<i32>,
     last_error: Option<String>,
     config: WorkerConfig,
+    satellite: Option<SatelliteWorkerView>,
+    identity_match: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +102,7 @@ struct StorageResp {
 struct ConfigUpdateReq {
     profile: Option<String>,
     listen_multiaddr: Option<String>,
+    advertise_multiaddr: Option<String>,
     satellite_url: Option<String>,
     device_name: Option<String>,
     owner_label: Option<String>,
@@ -116,8 +152,36 @@ fn load_config() -> AnyResult<WorkerConfig> {
         return Ok(WorkerConfig::default());
     }
     let bytes = fs::read(path)?;
-    let cfg = serde_json::from_slice::<WorkerConfig>(&bytes)?;
+    let mut cfg = serde_json::from_slice::<WorkerConfig>(&bytes)?;
+    reconcile_config_identity(&mut cfg)?;
     Ok(cfg)
+}
+
+fn reconcile_config_identity(cfg: &mut WorkerConfig) -> AnyResult<()> {
+    if cfg.profile.trim().is_empty() {
+        cfg.profile = "worker".to_string();
+    }
+    if cfg.listen_multiaddr.trim().is_empty() {
+        cfg.listen_multiaddr = "/ip4/0.0.0.0/tcp/5901".to_string();
+    }
+    if cfg.advertise_multiaddr.trim().is_empty() {
+        cfg.advertise_multiaddr = cfg.listen_multiaddr.clone();
+    }
+    if cfg.device_name.trim().is_empty() {
+        cfg.device_name = default_device_name();
+    }
+    if cfg.device_name == "Local Worker" || cfg.device_name == "Local_worker" {
+        cfg.device_name = default_device_name();
+    }
+    if cfg.worker_id.trim().is_empty() {
+        cfg.worker_id = worker_id_for_profile(&cfg.profile)?;
+    } else {
+        let derived = worker_id_for_profile(&cfg.profile)?;
+        if cfg.worker_id != derived {
+            cfg.worker_id = derived;
+        }
+    }
+    Ok(())
 }
 
 fn save_config(cfg: &WorkerConfig) -> AnyResult<()> {
@@ -176,7 +240,62 @@ fn snapshot_status(state: &AgentState) -> WorkerStatusResp {
         last_exit_code: state.last_exit_code,
         last_error: state.last_error.clone(),
         config: state.config.clone(),
+        satellite: None,
+        identity_match: None,
     }
+}
+
+async fn fetch_satellite_worker(
+    satellite_url: &str,
+    worker_id: &str,
+) -> AnyResult<Option<SatelliteWorkerView>> {
+    #[derive(Debug, Deserialize)]
+    struct SatelliteWorkerInfo {
+        worker_id: String,
+        multiaddr: String,
+        device_name: String,
+        owner_label: String,
+        enabled: bool,
+    }
+
+    let endpoint = format!(
+        "{}/worker?worker_id={}",
+        satellite_url.trim_end_matches('/'),
+        urlencoding::encode(worker_id)
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(endpoint).send().await?;
+    if res.status() == StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let res = res.error_for_status()?;
+    let worker = res.json::<SatelliteWorkerInfo>().await?;
+    Ok(Some(SatelliteWorkerView {
+        worker_id: worker.worker_id,
+        multiaddr: worker.multiaddr,
+        device_name: worker.device_name,
+        owner_label: worker.owner_label,
+        enabled: worker.enabled,
+    }))
+}
+
+async fn push_satellite_update(cfg: &WorkerConfig) -> AnyResult<()> {
+    let endpoint = format!("{}/update_worker", cfg.satellite_url.trim_end_matches('/'));
+    let payload = json!({
+        "worker_id": cfg.worker_id,
+        "multiaddr": cfg.advertise_multiaddr,
+        "device_name": cfg.device_name,
+        "owner_label": cfg.owner_label,
+        "capacity_limit_bytes": cfg.capacity_limit_bytes,
+        "enabled": cfg.enabled
+    });
+    let client = reqwest::Client::new();
+    let res = client.post(endpoint).json(&payload).send().await?;
+    if res.status() == StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    res.error_for_status()?;
+    Ok(())
 }
 
 fn apply_config_update(
@@ -202,6 +321,16 @@ fn apply_config_update(
             ));
         }
         cfg.listen_multiaddr = trimmed.to_string();
+    }
+    if let Some(v) = &req.advertise_multiaddr {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "advertise_multiaddr cannot be empty".to_string(),
+            ));
+        }
+        cfg.advertise_multiaddr = trimmed.to_string();
     }
     if let Some(v) = &req.satellite_url {
         let trimmed = v.trim();
@@ -239,6 +368,9 @@ fn apply_config_update(
     if let Some(v) = req.enabled {
         cfg.enabled = v;
     }
+    if let Err(err) = reconcile_config_identity(cfg) {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
+    }
     Ok(())
 }
 
@@ -249,6 +381,8 @@ fn spawn_worker(cfg: &WorkerConfig) -> AnyResult<Child> {
         .arg(&cfg.profile)
         .arg("--listen")
         .arg(&cfg.listen_multiaddr)
+        .arg("--advertise-multiaddr")
+        .arg(&cfg.advertise_multiaddr)
         .arg("--satellite-url")
         .arg(&cfg.satellite_url)
         .arg("--device-name")
@@ -314,9 +448,28 @@ fn scan_storage(profile: &str) -> AnyResult<StorageResp> {
 }
 
 async fn status(State(state): State<AppState>) -> Json<WorkerStatusResp> {
-    let mut guard = state.inner.lock().await;
-    refresh_process_state(&mut guard);
-    Json(snapshot_status(&guard))
+    let (mut out, cfg) = {
+        let mut guard = state.inner.lock().await;
+        refresh_process_state(&mut guard);
+        (snapshot_status(&guard), guard.config.clone())
+    };
+
+    match fetch_satellite_worker(&cfg.satellite_url, &cfg.worker_id).await {
+        Ok(satellite) => {
+            out.identity_match = satellite.as_ref().map(|w| w.worker_id == cfg.worker_id);
+            out.satellite = satellite;
+        }
+        Err(err) => {
+            let prev = out.last_error.unwrap_or_default();
+            out.last_error = Some(if prev.is_empty() {
+                format!("satellite status lookup failed: {err}")
+            } else {
+                format!("{prev}; satellite status lookup failed: {err}")
+            });
+        }
+    }
+
+    Json(out)
 }
 
 async fn start(State(state): State<AppState>) -> Result<Json<ActionResp>, (StatusCode, String)> {
@@ -422,15 +575,20 @@ async fn config(
         guard.child = Some(new_child);
     }
 
+    let mut message = if restart_if_running {
+        "config updated and worker restarted".to_string()
+    } else {
+        "config updated".to_string()
+    };
+    if let Err(err) = push_satellite_update(&cfg).await {
+        message.push_str(&format!(" (satellite metadata sync pending: {err})"));
+    }
+
     let mut guard = state.inner.lock().await;
     refresh_process_state(&mut guard);
     Ok(Json(ActionResp {
         status: "ok".to_string(),
-        message: if restart_if_running {
-            "config updated and worker restarted".to_string()
-        } else {
-            "config updated".to_string()
-        },
+        message,
         worker: snapshot_status(&guard),
     }))
 }
@@ -447,6 +605,7 @@ async fn storage(State(state): State<AppState>) -> Result<Json<StorageResp>, (St
 #[tokio::main]
 async fn main() -> AnyResult<()> {
     let cfg = load_config().unwrap_or_default();
+    let _ = save_config(&cfg);
     let state = AppState {
         inner: Arc::new(Mutex::new(AgentState {
             config: cfg,

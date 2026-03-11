@@ -24,6 +24,7 @@ async function downloadAction(formData: FormData) {
     redirect("/files/download?err=file_id+is+required");
   }
 
+  let json: DownloadApiResp;
   try {
     const base = satelliteBaseUrl();
     const res = await fetch(`${base}/download`, {
@@ -33,20 +34,22 @@ async function downloadAction(formData: FormData) {
       body: JSON.stringify({ file_id: fileId }),
     });
     if (!res.ok) {
-      throw new Error(await res.text());
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`);
     }
-    const json = (await res.json()) as DownloadApiResp;
-    redirect(
-      `/files/download?ok=1&file_id=${encodeURIComponent(json.file_id)}&original_hash=${encodeURIComponent(
-        json.original_hash,
-      )}&restored_hash=${encodeURIComponent(json.restored_hash)}&equal=${json.equal ? "1" : "0"}&bytes=${
-        json.bytes
-      }&data=${encodeURIComponent(json.file_bytes_base64)}`,
-    );
+    json = (await res.json()) as DownloadApiResp;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     redirect(`/files/download?err=${encodeURIComponent(msg)}`);
   }
+
+  redirect(
+    `/files/download?ok=1&file_id=${encodeURIComponent(json.file_id)}&original_hash=${encodeURIComponent(
+      json.original_hash,
+    )}&restored_hash=${encodeURIComponent(json.restored_hash)}&equal=${json.equal ? "1" : "0"}&bytes=${
+      json.bytes
+    }&data=${encodeURIComponent(json.file_bytes_base64)}`,
+  );
 }
 
 export default async function DownloadPage({ searchParams }: DownloadPageProps) {
@@ -71,7 +74,7 @@ export default async function DownloadPage({ searchParams }: DownloadPageProps) 
         </Link>
       </div>
 
-      {params.err ? <p className="mt-4 text-sm text-red-700">{decodeURIComponent(params.err)}</p> : null}
+      {ok ? null : params.err ? <p className="mt-4 text-sm text-red-700">{decodeURIComponent(params.err)}</p> : null}
 
       {ok ? (
         <div className="mt-4 space-y-1 text-sm">

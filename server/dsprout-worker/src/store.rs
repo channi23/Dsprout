@@ -60,7 +60,10 @@ impl HotCache {
 
 fn base_dir() -> Result<PathBuf> {
     let base = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("No data_dir"))?;
-    let dir = base.join("dsprout").join("worker_store").join(active_profile());
+    let dir = base
+        .join("dsprout")
+        .join("worker_store")
+        .join(active_profile());
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

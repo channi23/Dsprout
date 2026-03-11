@@ -18,6 +18,7 @@ use std::env;
 struct RunArgs {
     profile: String,
     listen: Multiaddr,
+    advertise_multiaddr: Option<Multiaddr>,
     satellite_url: String,
     device_name: String,
     owner_label: String,
@@ -115,6 +116,7 @@ fn parse_seed_args(args: &[String]) -> Result<(String, u32, u8, Vec<u8>)> {
 fn parse_run_args(args: &[String]) -> Result<RunArgs> {
     let mut profile = "worker".to_string();
     let mut listen: Multiaddr = "/ip4/0.0.0.0/tcp/4001".parse()?;
+    let mut advertise_multiaddr: Option<Multiaddr> = None;
     let mut satellite_url = "http://127.0.0.1:7070".to_string();
     let mut device_name: Option<String> = None;
     let mut owner_label = "local-contributor".to_string();
@@ -137,6 +139,13 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs> {
                     .get(i)
                     .ok_or_else(|| anyhow::anyhow!("missing value for --listen"))?;
                 listen = v.parse()?;
+            }
+            "--advertise-multiaddr" => {
+                i += 1;
+                let v = args
+                    .get(i)
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --advertise-multiaddr"))?;
+                advertise_multiaddr = Some(v.parse()?);
             }
             "--satellite-url" => {
                 i += 1;
@@ -190,6 +199,7 @@ fn parse_run_args(args: &[String]) -> Result<RunArgs> {
         enabled,
         profile,
         listen,
+        advertise_multiaddr,
         satellite_url,
     })
 }
@@ -284,13 +294,18 @@ async fn main() -> Result<()> {
     swarm.listen_on(run.listen.clone())?;
 
     let worker_id = swarm.local_peer_id().to_string();
+    let advertised_multiaddr = run
+        .advertise_multiaddr
+        .clone()
+        .unwrap_or_else(|| run.listen.clone());
     println!("Worker peer id: {worker_id}");
     println!("Worker profile: {}", run.profile);
     println!("Worker listening on: {}", run.listen);
+    println!("Worker advertised as: {}", advertised_multiaddr);
 
     let reg = RegisterWorkerReq {
         worker_id: worker_id.clone(),
-        multiaddr: run.listen.to_string(),
+        multiaddr: advertised_multiaddr.to_string(),
         device_name: run.device_name.clone(),
         owner_label: run.owner_label.clone(),
         capacity_limit_bytes: run.capacity_limit_bytes,

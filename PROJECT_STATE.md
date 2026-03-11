@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last updated after Milestone 15.
+Last updated after Milestone 15 + Next.js local upload/dev-origin hotfix.
 
 ## current architecture
 
@@ -75,6 +75,16 @@ Last updated after Milestone 15.
 
 - `PROJECT_STATE.md`
 - Updated for Milestone 15.
+
+- `app/next.config.ts`
+- Added local-dev upload/body limits:
+- `experimental.serverActions.bodySizeLimit = "50mb"`
+- `experimental.proxyClientMaxBodySize = "50mb"`
+- Added LAN dev origin allow-list:
+- `allowedDevOrigins = ["10.64.23.40"]`
+
+- `app/app/files/upload/page.tsx`
+- Added note that Server Action file upload sizing changes are temporary and larger/production uploads should move to a dedicated Route Handler/API endpoint.
 
 ## commands to run
 

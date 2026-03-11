@@ -53,11 +53,19 @@ async function updateConfigAction(formData: FormData) {
   "use server";
 
   const deviceName = String(formData.get("device_name") || "").trim();
+  const listenMultiaddr = String(formData.get("listen_multiaddr") || "").trim();
+  const advertiseMultiaddr = String(formData.get("advertise_multiaddr") || "").trim();
   const capacityRaw = String(formData.get("capacity_limit_bytes") || "").trim();
   const capacity = Number.parseInt(capacityRaw, 10);
 
   if (!deviceName) {
     redirect("/agent?err=device_name+is+required");
+  }
+  if (!listenMultiaddr) {
+    redirect("/agent?err=listen_multiaddr+is+required");
+  }
+  if (!advertiseMultiaddr) {
+    redirect("/agent?err=advertise_multiaddr+is+required");
   }
   if (!Number.isFinite(capacity) || capacity < 0) {
     redirect("/agent?err=capacity_limit_bytes+must+be+>=+0");
@@ -68,6 +76,8 @@ async function updateConfigAction(formData: FormData) {
   try {
     await postAgent("/config", {
       device_name: deviceName,
+      listen_multiaddr: listenMultiaddr,
+      advertise_multiaddr: advertiseMultiaddr,
       capacity_limit_bytes: capacity,
       restart_if_running: restartIfRunning,
     });
@@ -128,6 +138,10 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
             <span className="font-semibold">pid:</span> {status.pid ?? "-"}
           </p>
           <p>
+            <span className="font-semibold">local worker_id:</span>{" "}
+            <span className="font-mono">{status.config.worker_id}</span>
+          </p>
+          <p>
             <span className="font-semibold">device_name:</span> {status.config.device_name}
           </p>
           <p>
@@ -140,7 +154,23 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
             <span className="font-semibold">listen:</span> <span className="font-mono">{status.config.listen_multiaddr}</span>
           </p>
           <p>
+            <span className="font-semibold">advertise:</span>{" "}
+            <span className="font-mono">{status.config.advertise_multiaddr}</span>
+          </p>
+          <p>
             <span className="font-semibold">satellite_url:</span> <span className="font-mono">{status.config.satellite_url}</span>
+          </p>
+          <p>
+            <span className="font-semibold">satellite worker_id:</span>{" "}
+            <span className="font-mono">{status.satellite?.worker_id || "-"}</span>
+          </p>
+          <p>
+            <span className="font-semibold">identity match:</span>{" "}
+            {status.identity_match === null ? "-" : status.identity_match ? "yes" : "no"}
+          </p>
+          <p>
+            <span className="font-semibold">satellite multiaddr:</span>{" "}
+            <span className="font-mono">{status.satellite?.multiaddr || "-"}</span>
           </p>
           <p>
             <span className="font-semibold">last_exit_code:</span> {status.last_exit_code ?? "-"}
@@ -177,6 +207,10 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
 
       {status ? (
         <form action={updateConfigAction} className="mt-6 grid max-w-2xl gap-3 text-sm">
+          <p className="text-xs text-gray-500">
+            LAN tip: use listen <span className="font-mono">/ip4/0.0.0.0/tcp/5901</span> and advertise your LAN IP
+            multiaddr.
+          </p>
           <label>
             device_name
             <input
@@ -195,6 +229,24 @@ export default async function AgentPage({ searchParams }: AgentPageProps) {
               required
               defaultValue={String(status.config.capacity_limit_bytes)}
               className="mt-1 block w-full rounded border px-3 py-2"
+            />
+          </label>
+          <label>
+            listen_multiaddr
+            <input
+              name="listen_multiaddr"
+              required
+              defaultValue={status.config.listen_multiaddr}
+              className="mt-1 block w-full rounded border px-3 py-2 font-mono"
+            />
+          </label>
+          <label>
+            advertise_multiaddr
+            <input
+              name="advertise_multiaddr"
+              required
+              defaultValue={status.config.advertise_multiaddr}
+              className="mt-1 block w-full rounded border px-3 py-2 font-mono"
             />
           </label>
           <label className="inline-flex items-center gap-2">

@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f4;
+  --foreground: #1d2a2b;
+  --surface: #ffffff;
+  --surface-muted: #edf1eb;
+  --border: #c8d5c4;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-soft: #d7efeb;
+  --success: #1f8f4e;
+  --danger: #c53030;
+  --shadow: 0 12px 28px rgba(17, 24, 39, 0.09);
 }
 
 @theme inline {
@@ -14,13 +23,163 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #091112;
+    --foreground: #e8f0e8;
+    --surface: #0f1b1c;
+    --surface-muted: #162628;
+    --border: #284345;
+    --accent: #2db6a3;
+    --accent-strong: #7ce0d1;
+    --accent-soft: #133032;
+    --success: #53c87e;
+    --danger: #ff7f7f;
+    --shadow: 0 14px 32px rgba(0, 0, 0, 0.35);
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Segoe UI", "Trebuchet MS", sans-serif;
+  line-height: 1.45;
+  margin: 0;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(circle at 8% 6%, rgba(15, 118, 110, 0.16), transparent 34%),
+    radial-gradient(circle at 87% 10%, rgba(242, 167, 45, 0.15), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 65%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 28%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+main {
+  max-width: 1120px;
+  margin: 1.25rem auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(2px);
+  animation: fade-up 220ms ease-out;
+}
+
+h1 {
+  letter-spacing: -0.02em;
+}
+
+p,
+div,
+label,
+td,
+th,
+input,
+select,
+button {
+  font-size: 0.95rem;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--accent-strong);
+}
+
+input,
+select,
+textarea {
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+button {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-soft) 88%, var(--surface) 12%),
+    color-mix(in srgb, var(--accent-soft) 70%, var(--surface) 30%)
+  );
+  color: var(--accent-strong);
+  font-weight: 600;
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+button:hover {
+  filter: brightness(1.02);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+thead tr {
+  background: color-mix(in srgb, var(--surface-muted) 82%, var(--surface) 18%) !important;
+}
+
+th,
+td {
+  border-color: var(--border) !important;
+}
+
+.text-green-700 {
+  color: var(--success) !important;
+}
+
+.text-red-700 {
+  color: var(--danger) !important;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

@@ -446,7 +446,10 @@ async fn register_worker(
         last_seen: now_ms(),
     };
 
-    state.store.upsert_worker(&worker).map_err(to_internal_error)?;
+    state
+        .store
+        .upsert_worker(&worker)
+        .map_err(to_internal_error)?;
     state.workers.insert(req.worker_id, worker);
     Ok(Json("ok"))
 }
@@ -474,7 +477,10 @@ async fn update_worker(
         last_seen: now_ms(),
     };
 
-    state.store.upsert_worker(&updated).map_err(to_internal_error)?;
+    state
+        .store
+        .upsert_worker(&updated)
+        .map_err(to_internal_error)?;
     state
         .workers
         .insert(updated.worker_id.clone(), updated.clone());
@@ -534,7 +540,10 @@ async fn heartbeat(
         last_seen: now,
     };
 
-    state.store.upsert_worker(&worker).map_err(to_internal_error)?;
+    state
+        .store
+        .upsert_worker(&worker)
+        .map_err(to_internal_error)?;
     state.workers.insert(req.worker_id, worker);
     Ok(Json("ok"))
 }
@@ -569,9 +578,12 @@ async fn register_manifest(
     state: axum::extract::State<AppState>,
     Json(req): Json<RegisterManifestReq>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    req.signed_manifest
-        .verify()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid manifest signature: {e}")))?;
+    req.signed_manifest.verify().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid manifest signature: {e}"),
+        )
+    })?;
 
     state
         .store
@@ -598,10 +610,15 @@ async fn get_manifest(
     }
 }
 
-async fn upload_action(Json(req): Json<UploadReq>) -> Result<Json<UploadResp>, (StatusCode, String)> {
-    let file_bytes = B64
-        .decode(req.file_bytes_base64.as_bytes())
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid base64 payload: {e}")))?;
+async fn upload_action(
+    Json(req): Json<UploadReq>,
+) -> Result<Json<UploadResp>, (StatusCode, String)> {
+    let file_bytes = B64.decode(req.file_bytes_base64.as_bytes()).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid base64 payload: {e}"),
+        )
+    })?;
 
     let file_id = req
         .file_id
@@ -613,6 +630,14 @@ async fn upload_action(Json(req): Json<UploadReq>) -> Result<Json<UploadResp>, (
     tokio::fs::write(&tmp_input, &file_bytes)
         .await
         .map_err(to_internal_error)?;
+
+    println!(
+        "[/upload] start file_id={} bytes={} replication_factor={} tmp_input={}",
+        file_id,
+        file_bytes.len(),
+        replication_factor,
+        tmp_input.display()
+    );
 
     let args = vec![
         "upload".to_string(),
@@ -626,7 +651,17 @@ async fn upload_action(Json(req): Json<UploadReq>) -> Result<Json<UploadResp>, (
         replication_factor.to_string(),
     ];
 
-    run_uplink(&args).await.map_err(to_internal_error)?;
+    if let Err(err) = run_uplink(&args).await {
+        eprintln!("[/upload] uplink failed file_id={} err={}", file_id, err);
+        return Err(to_internal_error(err));
+    }
+
+    println!(
+        "[/upload] success file_id={} bytes={} replication_factor={}",
+        file_id,
+        file_bytes.len(),
+        replication_factor
+    );
 
     Ok(Json(UploadResp {
         status: "ok".to_string(),
@@ -652,7 +687,9 @@ async fn download_action(
     ];
 
     let stdout = run_uplink(&args).await.map_err(to_internal_error)?;
-    let bytes = tokio::fs::read(&tmp_output).await.map_err(to_internal_error)?;
+    let bytes = tokio::fs::read(&tmp_output)
+        .await
+        .map_err(to_internal_error)?;
 
     let original_hash = parse_kv_line(&stdout, "original_hash").unwrap_or_default();
     let restored_hash = parse_kv_line(&stdout, "restored_hash").unwrap_or_default();
@@ -671,7 +708,9 @@ async fn download_action(
     }))
 }
 
-async fn repair_action(Json(req): Json<RepairReq>) -> Result<Json<RepairResp>, (StatusCode, String)> {
+async fn repair_action(
+    Json(req): Json<RepairReq>,
+) -> Result<Json<RepairResp>, (StatusCode, String)> {
     let target = req.replication_factor.unwrap_or(2);
     let args = vec![
         "repair".to_string(),
