@@ -254,6 +254,22 @@ impl PersistentStore {
         Ok(())
     }
 
+    fn update_worker_shard_multiaddr(&self, worker_id: &str, multiaddr: &str) -> AnyResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("sqlite mutex poisoned"))?;
+        conn.execute(
+            "
+            UPDATE shard_records
+            SET worker_multiaddr = ?2
+            WHERE worker_id = ?1
+            ",
+            params![worker_id, multiaddr],
+        )?;
+        Ok(())
+    }
+
     fn insert_shard(&self, rec: &ShardRecord) -> AnyResult<()> {
         let conn = self
             .conn
@@ -427,6 +443,16 @@ fn upsert_shard_in_memory(state: &AppState, rec: ShardRecord) {
         .or_insert(vec![rec]);
 }
 
+fn rewrite_worker_multiaddr_in_memory(state: &AppState, worker_id: &str, multiaddr: &str) {
+    for mut entry in state.shard_index.iter_mut() {
+        for rec in entry.value_mut().iter_mut() {
+            if rec.worker_id == worker_id {
+                rec.worker_multiaddr = multiaddr.to_string();
+            }
+        }
+    }
+}
+
 fn parse_kv_line(stdout: &str, key: &str) -> Option<String> {
     stdout.lines().find_map(|line| {
         let (k, v) = line.split_once('=')?;
@@ -471,9 +497,11 @@ async fn register_worker(
         "[satellite] register_worker worker_id={} multiaddr={} device_name={} owner_label={} enabled={}",
         req.worker_id, req.multiaddr, req.device_name, req.owner_label, req.enabled
     );
+    let worker_id = req.worker_id.clone();
+    let multiaddr = req.multiaddr.clone();
     let worker = WorkerInfo {
-        worker_id: req.worker_id.clone(),
-        multiaddr: req.multiaddr,
+        worker_id: worker_id.clone(),
+        multiaddr: multiaddr.clone(),
         device_name: req.device_name,
         owner_label: req.owner_label,
         capacity_limit_bytes: req.capacity_limit_bytes,
@@ -486,7 +514,12 @@ async fn register_worker(
         .store
         .upsert_worker(&worker)
         .map_err(to_internal_error)?;
-    state.workers.insert(req.worker_id, worker);
+    state
+        .store
+        .update_worker_shard_multiaddr(&worker.worker_id, &worker.multiaddr)
+        .map_err(to_internal_error)?;
+    state.workers.insert(worker_id.clone(), worker);
+    rewrite_worker_multiaddr_in_memory(&state, &worker_id, &multiaddr);
     Ok(Json("ok"))
 }
 
@@ -530,8 +563,13 @@ async fn update_worker(
         .upsert_worker(&updated)
         .map_err(to_internal_error)?;
     state
+        .store
+        .update_worker_shard_multiaddr(&updated.worker_id, &updated.multiaddr)
+        .map_err(to_internal_error)?;
+    state
         .workers
         .insert(updated.worker_id.clone(), updated.clone());
+    rewrite_worker_multiaddr_in_memory(&state, &updated.worker_id, &updated.multiaddr);
     Ok(Json(updated))
 }
 
@@ -604,7 +642,12 @@ async fn heartbeat(
         .store
         .upsert_worker(&worker)
         .map_err(to_internal_error)?;
-    state.workers.insert(req.worker_id, worker);
+    state
+        .store
+        .update_worker_shard_multiaddr(&worker.worker_id, &worker.multiaddr)
+        .map_err(to_internal_error)?;
+    state.workers.insert(req.worker_id.clone(), worker);
+    rewrite_worker_multiaddr_in_memory(&state, &req.worker_id, &req.multiaddr);
     Ok(Json("ok"))
 }
 
