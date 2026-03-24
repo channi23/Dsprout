@@ -9,6 +9,35 @@ Use this when you want to:
 - verify the system is healthy
 - avoid the common LAN/IP mistakes
 
+## 0. Fast Start
+
+If you want the whole local stack to start with one command from repo root:
+
+```bash
+./start_dsprout.sh
+```
+
+This script will:
+- detect your current LAN IP
+- update `app/.env.local`
+- start satellite
+- start local agent
+- update worker advertise address to the current LAN IP
+- start the worker
+- start the frontend
+
+To stop everything:
+
+```bash
+./stop_dsprout.sh
+```
+
+Logs are written to:
+
+```text
+.dsprout/logs/
+```
+
 ## 1. What Each Part Does
 
 ### `app/` - Next.js frontend
