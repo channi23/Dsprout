@@ -1,0 +1,7 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/dsprout-agent`
+dsprout-agent listening on http://127.0.0.1:7081
+[agent] config updated worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.35.148.207/tcp/5901 satellite=http://127.0.0.1:7070 restart_if_running=false
+[agent] satellite update request worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 endpoint=http://127.0.0.1:7070/update_worker advertise_multiaddr=/ip4/10.35.148.207/tcp/5901
+[agent] satellite update ok worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3
+[agent] start worker profile=worker worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.35.148.207/tcp/5901 satellite=http://127.0.0.1:7070

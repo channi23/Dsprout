@@ -1,0 +1,219 @@
+
+> app@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.35.148.207:3000
+- Environments: .env.local
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "50mb"
+  · serverActions
+
+✓ Starting...
+✓ Ready in 870ms
+ GET / 200 in 516ms (compile: 371ms, render: 145ms)
+ GET /workers 200 in 93ms (compile: 27ms, render: 67ms)
+ GET /workers 200 in 64ms (compile: 7ms, render: 56ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 318ms (compile: 302ms, render: 16ms)
+ GET /workers 200 in 13ms (compile: 1632µs, render: 12ms)
+ GET /workers 200 in 53ms (compile: 5ms, render: 48ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 36ms (compile: 11ms, render: 25ms)
+ GET /workers 200 in 41ms (compile: 5ms, render: 36ms)
+ GET / 200 in 33ms (compile: 9ms, render: 24ms)
+ GET /files 200 in 43ms (compile: 25ms, render: 18ms)
+ GET /files/upload 200 in 73ms (compile: 62ms, render: 11ms)
+[uploadAction] start target=http://10.35.148.207:7070/upload bytes=36235 file_id=5566
+[uploadAction] response target=http://10.35.148.207:7070/upload status=200
+ GET /files/upload?ok=1&file_id=5566&hash=6dd151c3ae736076d11c0693c0e7de0e3a429aaa252148f7bd3087c28b187dd1&bytes=36235&replication_factor=1 200 in 11ms (compile: 987µs, render: 10ms)
+ POST /files/upload 303 in 1088ms (compile: 3ms, render: 1085ms)
+ GET /files 200 in 34ms (compile: 8ms, render: 27ms)
+ GET /files/download 200 in 64ms (compile: 53ms, render: 11ms)
+ POST /files/download 303 in 106ms (compile: 4ms, render: 102ms)
+ GET /files 200 in 35ms (compile: 7ms, render: 28ms)
+ GET /files/upload 200 in 29ms (compile: 8ms, render: 21ms)
+[uploadAction] start target=http://10.35.148.207:7070/upload bytes=1379635 file_id=9900
+[uploadAction] response target=http://10.35.148.207:7070/upload status=200
+ GET /files/upload?ok=1&file_id=9900&hash=9e337875fd83fc6a3bfdbad27ae68f9bfb22318c26917ad74b43888269272ce4&bytes=1379635&replication_factor=1 200 in 10ms (compile: 915µs, render: 9ms)
+ POST /files/upload 303 in 2.2s (compile: 4ms, render: 2.2s)
+ GET /files 200 in 26ms (compile: 7ms, render: 19ms)
+ GET /files?file_id=9900 200 in 188ms (compile: 3ms, render: 185ms)
+ GET /files?file_id=9900 200 in 99ms (compile: 4ms, render: 94ms)
+ GET /files?file_id=9900 200 in 121ms (compile: 3ms, render: 118ms)
+ GET /files/download 200 in 23ms (compile: 7ms, render: 16ms)
+failed to get redirect response TypeError: fetch failed
+    at ignore-listed frames {
+  [cause]: Error: write EPIPE
+      at ignore-listed frames {
+    errno: -32,
+    code: 'EPIPE',
+    syscall: 'write'
+  }
+}
+ POST /files/download 303 in 1617ms (compile: 4ms, render: 1613ms)
+ GET / 200 in 33ms (compile: 7ms, render: 26ms)
+ GET / 200 in 36ms (compile: 4ms, render: 33ms)
+ GET /files 200 in 36ms (compile: 6ms, render: 30ms)
+ GET /files/download 200 in 26ms (compile: 6ms, render: 20ms)
+failed to get redirect response TypeError: fetch failed
+    at ignore-listed frames {
+  [cause]: Error: write EPIPE
+      at ignore-listed frames {
+    errno: -32,
+    code: 'EPIPE',
+    syscall: 'write'
+  }
+}
+ POST /files/download 303 in 1510ms (compile: 1404µs, render: 1509ms)
+ GET /files/download?ok=1&file_id=2470&original_hash=7c788a7ec5176567b3b3c45a90185058bcde911b3eb95be78e7768371ccc598e&restored_hash=7c788a7ec5176567b3b3c45a90185058bcde911b3eb95be78e7768371ccc598e&equal=1&bytes=1130&data=iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm%2B48GgAAA%2FdJREFUeJztnT2IHVUYhp%2FPnyTomi3EVFEMCAp2StBCtBHERhEiimChhWIKQZCAYBBtBIXdJa2oIIgWimCnRSAEfxCNRRQrIa5uIUiyEhIiuvtazG6yN9mZvXPv%2FHzsvA%2Bc6pz55rvz7Jk558wZNiRh8nBV3wmYUSwkGRaSDAtJhoUkw0KSYSHJsJBkWEgyLCQZFpIMC2mIiNgREXMRcXqtzEXEjtpxvLg4PRERwEfAE5dVLUh6qVYsC5meiHgDOLxJ1WlJN9aJ5VvWlETE08CrTcWzkCmIiPuAd4AoafJB7Zi%2BZU1GROwDvgX2lDT5HnhA0vlacS2kPhGxG%2FgauLOkySngXkl%2F1o3tW1ZNIuJa4FPKZZwFHplEBsA1kyZWh4josxueAf4B%2FgB%2BB34CTgDHJJ2ZIN4R4MGSuhXgKUknJ0kUAEmtF0AJy3%2FAceB5YHbM33Foi5gHp75WAxaysSwDrwM3VPyGxyh6QFmM%2BUaulYWMlEXg4U3yvxs4V3Hc58DVFtJOWQEOb8h9L7BU0f5HYKaxa2UhpWUemFm74GVtloC9TV6rTuYhPY%2BypuFnyoe354H7Jf3Q5Al7FyKpbNmhifPuBGYpZtOfALc3FHoVOCDps4biXWRbC7ksh1soljNuaiDcIUlvNxDnCgYzU5e0CDxJMf%2BYhvfbkgEDEgIg6SjF5G5SjlJMJFtjMLesjUTEe8AzNQ%2F7FdivyZZbxmZQPWQDBymeJ3V4t20ZMFAhki4AB4C%2Fahx2W0vpjDBIIQCSfqPYlDDuQ%2F6OFtO5yGCFQO2H%2FL42c1ln0EIAJM0DH47RdHfbuYCFrPMsxdpV1UN7VxeJDHLYW0ZE7AHKXr2ekzTTdg7uIaNULav83UUCFjLKPRV1p7pIwEJGeaii7pcuErCQNSLiVuDRiiZfdZGHhVziLWBnSd0q8GUXSVgIEBGvAY9XNDkuaamLXDrZKJeViLgOeBN4cYum8x2kAwx0HhIR11OsY73C1ouG31Hs0%2B1kX8C27iERsYvinfoscDNwF7CfYjQ1zlLIv8ALXcmABEKS70h5WdKJLk%2Foh3o5C5KOdH1SC7mSVYqdi7U%2B1myK3m9ZyVgEnpP0RV8JWEjBMrAAzEk622ciQxayAnxD8WHmx32LWGe7CxHFX%2F8FLn1BdZJiA%2FUxScs95rYpvQvJ9IIqAx5lJcNCkmEhybCQZFhIMiwkGRaSDAtJhoUkw0KSYSHJsJBkWEgyLCQZFpIMC0mGhSTDQpJhIcmwkGRYSDIsJBkWkgwLSYb%2FO0Iy3EOSYSHJsJBkWEgyLCQZFpIMC0mGhSTDQpJhIcmwkGRYSDIsJBkWkgwLSYaFJMNCkmEhybCQZPwPQLuu46UD%2FQAAAAAASUVORK5CYII%3D 200 in 15ms (compile: 1618µs, render: 14ms)
+ POST /files/download 303 in 87ms (compile: 4ms, render: 83ms)
+ GET / 200 in 28ms (compile: 7ms, render: 21ms)
+✓ Compiled in 329ms
+ GET / 200 in 365ms (compile: 341ms, render: 24ms)
+ GET / 200 in 343ms (compile: 238ms, render: 105ms)
+ GET / 200 in 345ms (compile: 289ms, render: 57ms)
+ GET / 200 in 342ms (compile: 188ms, render: 154ms)
+ GET / 200 in 345ms (compile: 264ms, render: 81ms)
+ GET / 200 in 352ms (compile: 310ms, render: 41ms)
+ GET / 200 in 77ms (compile: 1830µs, render: 76ms)
+ GET / 200 in 41ms (compile: 10ms, render: 30ms)
+ GET / 200 in 55ms (compile: 15ms, render: 40ms)
+ GET / 200 in 78ms (compile: 25ms, render: 54ms)
+ GET / 200 in 32ms (compile: 21ms, render: 11ms)
+ GET / 200 in 34ms (compile: 12ms, render: 22ms)
+ GET / 200 in 72ms (compile: 1572µs, render: 70ms)
+ GET / 200 in 72ms (compile: 9ms, render: 63ms)
+ GET / 200 in 65ms (compile: 13ms, render: 52ms)
+ GET / 200 in 53ms (compile: 16ms, render: 37ms)
+ GET / 200 in 54ms (compile: 9ms, render: 45ms)
+ GET / 200 in 46ms (compile: 16ms, render: 30ms)
+ GET / 200 in 46ms (compile: 1313µs, render: 45ms)
+ GET / 200 in 35ms (compile: 1517µs, render: 33ms)
+ GET / 200 in 34ms (compile: 15ms, render: 19ms)
+ GET / 200 in 35ms (compile: 8ms, render: 26ms)
+ GET / 200 in 27ms (compile: 18ms, render: 9ms)
+ GET /files 200 in 48ms (compile: 23ms, render: 25ms)
+ GET /files/download 200 in 84ms (compile: 65ms, render: 19ms)
+ GET /files/download?ok=1&file_id=9900&original_hash=9e337875fd83fc6a3bfdbad27ae68f9bfb22318c26917ad74b43888269272ce4&restored_hash=9e337875fd83fc6a3bfdbad27ae68f9bfb22318c26917ad74b43888269272ce4&equal=1&bytes=1379635 200 in 12ms (compile: 943µs, render: 11ms)
+ POST /files/download 303 in 1457ms (compile: 1427µs, render: 1456ms)
+ GET / 200 in 43ms (compile: 13ms, render: 30ms)
+ GET /workers 200 in 49ms (compile: 25ms, render: 24ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 53ms (compile: 27ms, render: 26ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 106ms (compile: 4ms, render: 102ms)
+ GET /workers 200 in 33ms (compile: 6ms, render: 27ms)
+ GET /workers 200 in 51ms (compile: 5ms, render: 46ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 34ms (compile: 6ms, render: 28ms)
+ GET /workers 200 in 18ms (compile: 2ms, render: 16ms)
+ GET /workers 200 in 52ms (compile: 6ms, render: 46ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 41ms (compile: 11ms, render: 30ms)
+ GET /workers 200 in 31ms (compile: 5ms, render: 26ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 41ms (compile: 8ms, render: 33ms)
+ GET /workers 200 in 32ms (compile: 4ms, render: 27ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 37ms (compile: 6ms, render: 31ms)
+ GET /workers 200 in 30ms (compile: 5ms, render: 25ms)
+ GET /workers 200 in 54ms (compile: 2ms, render: 52ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 38ms (compile: 9ms, render: 29ms)
+ GET /workers 200 in 32ms (compile: 3ms, render: 29ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 39ms (compile: 6ms, render: 33ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 50ms (compile: 8ms, render: 42ms)
+ GET /workers 200 in 32ms (compile: 6ms, render: 26ms)
+ GET /workers 200 in 47ms (compile: 5ms, render: 42ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 39ms (compile: 11ms, render: 28ms)
+ GET /workers 200 in 30ms (compile: 4ms, render: 26ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 38ms (compile: 6ms, render: 32ms)
+ GET /workers 200 in 29ms (compile: 3ms, render: 26ms)
+ GET / 200 in 25ms (compile: 6ms, render: 19ms)
+ GET /files 200 in 19ms (compile: 4ms, render: 15ms)
+ GET /files?file_id=2470 200 in 113ms (compile: 3ms, render: 109ms)
+ GET /files/download 200 in 27ms (compile: 7ms, render: 20ms)
+ GET /files/download?ok=1&file_id=2470&original_hash=7c788a7ec5176567b3b3c45a90185058bcde911b3eb95be78e7768371ccc598e&restored_hash=7c788a7ec5176567b3b3c45a90185058bcde911b3eb95be78e7768371ccc598e&equal=1&bytes=1130 200 in 12ms (compile: 1016µs, render: 11ms)
+ POST /files/download 303 in 100ms (compile: 3ms, render: 97ms)
+ GET / 200 in 33ms (compile: 7ms, render: 26ms)
+ GET /files 200 in 33ms (compile: 5ms, render: 28ms)
+ GET /files?file_id=9900 200 in 95ms (compile: 3ms, render: 92ms)
+ GET /files?file_id=2470 200 in 176ms (compile: 6ms, render: 170ms)
+ GET / 200 in 32ms (compile: 6ms, render: 27ms)
+ GET /workers 200 in 36ms (compile: 5ms, render: 31ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 23ms (compile: 4ms, render: 19ms)
+ GET /workers 200 in 30ms (compile: 3ms, render: 27ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 40ms (compile: 7ms, render: 33ms)
+ GET /workers 200 in 31ms (compile: 4ms, render: 27ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 38ms (compile: 10ms, render: 29ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 55ms (compile: 7ms, render: 49ms)
+ GET /workers 200 in 31ms (compile: 5ms, render: 26ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 40ms (compile: 7ms, render: 33ms)
+ GET /workers 200 in 31ms (compile: 3ms, render: 27ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 30ms (compile: 6ms, render: 25ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 49ms (compile: 7ms, render: 42ms)
+ GET /workers 200 in 23ms (compile: 4ms, render: 18ms)
+ GET / 200 in 29ms (compile: 4ms, render: 24ms)
+ GET / 200 in 53ms (compile: 11ms, render: 42ms)
+ GET /workers 200 in 39ms (compile: 7ms, render: 32ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 36ms (compile: 10ms, render: 27ms)
+ GET /workers 200 in 30ms (compile: 4ms, render: 27ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 51ms (compile: 17ms, render: 33ms)
+ GET /workers 200 in 32ms (compile: 7ms, render: 25ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 30ms (compile: 6ms, render: 24ms)
+ GET /workers 200 in 32ms (compile: 4ms, render: 28ms)
+ GET / 200 in 27ms (compile: 6ms, render: 21ms)
+ GET / 200 in 44ms (compile: 4ms, render: 41ms)
+ GET /files 200 in 33ms (compile: 6ms, render: 26ms)
+ GET /files/upload 200 in 41ms (compile: 23ms, render: 18ms)
+[uploadAction] start target=http://10.35.148.207:7070/upload bytes=1007556 file_id=0001
+[uploadAction] response target=http://10.35.148.207:7070/upload status=200
+ GET /files/upload?ok=1&file_id=0001&hash=70e250a29f4bf0dc1db389d2f7080e29da3222399e09d50a0e4cda06f446b893&bytes=1007556&replication_factor=1 200 in 11ms (compile: 1051µs, render: 10ms)
+ POST /files/upload 303 in 6.0s (compile: 3ms, render: 6.0s)
+ GET /files 200 in 30ms (compile: 7ms, render: 23ms)
+ GET /files?file_id=0001 200 in 103ms (compile: 5ms, render: 98ms)
+ GET /files/download 200 in 28ms (compile: 7ms, render: 21ms)
+ GET /files/download?ok=1&file_id=0001&original_hash=70e250a29f4bf0dc1db389d2f7080e29da3222399e09d50a0e4cda06f446b893&restored_hash=70e250a29f4bf0dc1db389d2f7080e29da3222399e09d50a0e4cda06f446b893&equal=1&bytes=1007556 200 in 9ms (compile: 851µs, render: 8ms)
+ POST /files/download 303 in 1772ms (compile: 3ms, render: 1769ms)
+ GET /files/download/file?file_id=0001 200 in 1919ms (compile: 201ms, render: 1719ms)
+ GET / 200 in 26ms (compile: 5ms, render: 21ms)
+ GET /workers 200 in 43ms (compile: 5ms, render: 38ms)
+ GET /workers 200 in 86ms (compile: 23ms, render: 63ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 34ms (compile: 11ms, render: 23ms)
+ GET /workers 200 in 32ms (compile: 4ms, render: 28ms)
+ GET /workers 200 in 90ms (compile: 23ms, render: 67ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 42ms (compile: 13ms, render: 28ms)
+ GET /workers 200 in 30ms (compile: 4ms, render: 25ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 35ms (compile: 7ms, render: 28ms)
+ GET /workers 200 in 30ms (compile: 4ms, render: 26ms)
+ GET / 200 in 26ms (compile: 5ms, render: 21ms)
+ GET / 200 in 54ms (compile: 3ms, render: 52ms)
+ GET /files 200 in 30ms (compile: 6ms, render: 25ms)
+ GET /files/upload 200 in 23ms (compile: 6ms, render: 17ms)
+[uploadAction] start target=http://10.35.148.207:7070/upload bytes=1379635 file_id=55
+[uploadAction] response target=http://10.35.148.207:7070/upload status=200
+ GET /files/upload?ok=1&file_id=55&hash=9e337875fd83fc6a3bfdbad27ae68f9bfb22318c26917ad74b43888269272ce4&bytes=1379635&replication_factor=1 200 in 11ms (compile: 827µs, render: 10ms)
+ POST /files/upload 303 in 3.5s (compile: 4ms, render: 3.5s)
+ GET /files/download 200 in 25ms (compile: 7ms, render: 18ms)
+ GET /files 200 in 31ms (compile: 5ms, render: 26ms)
+ GET /files?file_id=55 200 in 90ms (compile: 1817µs, render: 88ms)
+ GET /files?file_id=55 200 in 189ms (compile: 29ms, render: 160ms)
+ GET / 200 in 13ms (compile: 3ms, render: 11ms)
+ GET /contributors 200 in 177ms (compile: 128ms, render: 49ms)
+ GET /workers 200 in 34ms (compile: 6ms, render: 28ms)
+ GET /workers/12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 200 in 45ms (compile: 11ms, render: 34ms)
+ GET /workers 200 in 30ms (compile: 5ms, render: 25ms)
+ GET /workers/12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN 200 in 38ms (compile: 7ms, render: 31ms)
+ GET /workers 200 in 28ms (compile: 4ms, render: 24ms)
+ GET / 200 in 27ms (compile: 5ms, render: 22ms)
+ GET /files 200 in 29ms (compile: 5ms, render: 24ms)
+ GET /files/upload 200 in 28ms (compile: 7ms, render: 21ms)
+[uploadAction] start target=http://10.35.148.207:7070/upload bytes=36235 file_id=91
+[uploadAction] response target=http://10.35.148.207:7070/upload status=200
+ GET /files/upload?ok=1&file_id=91&hash=6dd151c3ae736076d11c0693c0e7de0e3a429aaa252148f7bd3087c28b187dd1&bytes=36235&replication_factor=1 200 in 21ms (compile: 2ms, render: 19ms)
+ POST /files/upload 303 in 1518ms (compile: 6ms, render: 1512ms)
+ GET /files 200 in 23ms (compile: 4ms, render: 19ms)
+ GET /files?file_id=91 200 in 91ms (compile: 5ms, render: 86ms)
+ GET /files/download 200 in 33ms (compile: 8ms, render: 25ms)
+ GET /files/download?ok=1&file_id=91&original_hash=6dd151c3ae736076d11c0693c0e7de0e3a429aaa252148f7bd3087c28b187dd1&restored_hash=6dd151c3ae736076d11c0693c0e7de0e3a429aaa252148f7bd3087c28b187dd1&equal=1&bytes=36235 200 in 11ms (compile: 1121µs, render: 10ms)
+ POST /files/download 303 in 765ms (compile: 3ms, render: 762ms)
+ GET /files/download/file?file_id=91 200 in 677ms (compile: 4ms, render: 674ms)
+ GET / 200 in 31ms (compile: 8ms, render: 23ms)
+ GET /workers 200 in 40ms (compile: 8ms, render: 32ms)
+ GET /contributors 200 in 40ms (compile: 6ms, render: 34ms)
+ GET /agent 200 in 93ms (compile: 73ms, render: 20ms)
+ GET / 200 in 25ms (compile: 4ms, render: 21ms)
+[?25h

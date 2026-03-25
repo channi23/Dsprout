@@ -11,7 +11,6 @@ type DownloadPageProps = {
     restored_hash?: string;
     equal?: string;
     bytes?: string;
-    data?: string;
   }>;
 };
 
@@ -48,7 +47,7 @@ async function downloadAction(formData: FormData) {
       json.original_hash,
     )}&restored_hash=${encodeURIComponent(json.restored_hash)}&equal=${json.equal ? "1" : "0"}&bytes=${
       json.bytes
-    }&data=${encodeURIComponent(json.file_bytes_base64)}`,
+    }`,
   );
 }
 
@@ -84,22 +83,24 @@ export default async function DownloadPage({ searchParams }: DownloadPageProps) 
           <p>restored_hash: {params.restored_hash}</p>
           <p>equal: {equal ? "true" : "false"}</p>
           <p>bytes: {params.bytes}</p>
-          {params.data ? (
-            <a
-              className="inline-block mt-2 rounded border px-3 py-2 font-medium"
-              href={`data:application/octet-stream;base64,${params.data}`}
-              download={params.file_id || "download.bin"}
-            >
-              Save Downloaded File
-            </a>
-          ) : null}
+          <a
+            className="inline-block mt-2 rounded border px-3 py-2 font-medium"
+            href={`/files/download/file?file_id=${encodeURIComponent(params.file_id || "")}`}
+          >
+            Save Downloaded File
+          </a>
         </div>
       ) : null}
 
       <form action={downloadAction} className="mt-6 grid max-w-2xl gap-3 text-sm">
         <label>
           file_id
-          <input name="file_id" required className="mt-1 block w-full rounded border px-3 py-2 font-mono" />
+          <input
+            name="file_id"
+            required
+            defaultValue={params.file_id || ""}
+            className="mt-1 block w-full rounded border px-3 py-2 font-mono"
+          />
         </label>
         <button type="submit" className="mt-2 w-fit rounded border px-4 py-2 font-medium">
           Download
