@@ -78,6 +78,7 @@ export default async function UploadPage({ searchParams }: UploadPageProps) {
     <main className="min-h-screen p-6 md:p-10">
       <h1 className="text-2xl font-semibold">Upload File</h1>
       <p className="mt-1 text-sm text-gray-600">HTTP-backed upload through satellite `/upload`.</p>
+      <p className="mt-1 text-sm text-gray-600">Max upload size: up to 50 MB.</p>
       <p className="mt-1 text-xs text-gray-500">Target URL: {targetUrl}</p>
 
       <div className="mt-4 flex gap-3 text-sm">

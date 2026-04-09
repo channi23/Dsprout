@@ -6,10 +6,10 @@ const nextConfig: NextConfig = {
     // Temporary local-dev increase while upload still flows through Server Actions.
     // Long-term: move large file uploads to a dedicated Route Handler / API endpoint.
     serverActions: {
-      bodySizeLimit: "50mb",
+      bodySizeLimit: "1gb",
     },
     // Needed for multipart/form-data buffering path before Server Actions parsing.
-    proxyClientMaxBodySize: "50mb",
+    proxyClientMaxBodySize: "1gb",
   },
 };
 
