@@ -1,27 +1,7 @@
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
      Running `target/debug/dsprout-agent`
 dsprout-agent listening on http://127.0.0.1:7081
-[agent] config updated worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.82/tcp/5901 satellite=http://10.145.113.207:7070 restart_if_running=false
-[agent] satellite update request worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN endpoint=http://10.145.113.207:7070/update_worker advertise_multiaddr=/ip4/10.145.113.82/tcp/5901
-[agent] satellite update ok worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN
-[agent] start worker profile=worker worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.82/tcp/5901 satellite=http://10.145.113.207:7070
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-satellite call failed endpoint=http://10.145.113.207:7070/heartbeat: error sending request for url (http://10.145.113.207:7070/heartbeat)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-Incoming connection error: Listen error: Failed to negotiate transport protocol(s)
-[agent] config updated worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.82/tcp/5901 satellite=http://10.145.113.207:7070 restart_if_running=true
-[agent] satellite update request worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN endpoint=http://10.145.113.207:7070/update_worker advertise_multiaddr=/ip4/10.145.113.82/tcp/5901
-[agent] satellite update ok worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN
-Error: 
-
-Caused by:
-    Address already in use (os error 48)
-[agent] start worker profile=worker worker_id=12D3KooWMhQEjQBZomunNUvi7ntx6888sg34XgSzzKCX358JwTRN listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.82/tcp/5901 satellite=http://10.145.113.207:7070
-Error: 
-
-Caused by:
-    Address already in use (os error 48)
+[agent] config updated worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.207/tcp/5901 satellite=http://127.0.0.1:7070 restart_if_running=false
+[agent] satellite update request worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 endpoint=http://127.0.0.1:7070/update_worker advertise_multiaddr=/ip4/10.145.113.207/tcp/5901
+[agent] satellite update ok worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3
+[agent] start worker profile=worker worker_id=12D3KooWCwHWQoB8ENdjhwu2v4EvY4ZiMe4T1SZP9JJiBjFe46S3 listen=/ip4/0.0.0.0/tcp/5901 advertise=/ip4/10.145.113.207/tcp/5901 satellite=http://127.0.0.1:7070
